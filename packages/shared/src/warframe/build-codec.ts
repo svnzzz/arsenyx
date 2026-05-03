@@ -1,9 +1,11 @@
 import { normalizePolarity } from "./mods"
 import { RIVEN_IMAGE_NAME, RIVEN_UNIQUE_NAME } from "./rivens"
 import { SHARD_COLORS, getStatByIndex, getStatIndex } from "./shards"
+import { DEFAULT_DEPLOYMENT_CONTEXT } from "./types"
 import type {
   BrowseCategory,
   BuildState,
+  DeploymentContext,
   LichBonusElement,
   ModSlot,
   PlacedArcane,
@@ -31,6 +33,7 @@ interface EncodedBuild {
   zc?: { g: string; l: string }
   lb?: string
   ic?: { e: boolean; p?: (string | null)[] }
+  dc?: DeploymentContext
 }
 
 interface EncodedHelminth {
@@ -132,6 +135,13 @@ export function encodeBuild(state: BuildState): string {
   if (state.incarnonEnabled !== undefined || hasPickedPerks) {
     encoded.ic = { e: state.incarnonEnabled ?? false }
     if (hasPickedPerks) encoded.ic.p = state.incarnonPerks
+  }
+
+  if (
+    state.deploymentContext &&
+    state.deploymentContext !== DEFAULT_DEPLOYMENT_CONTEXT
+  ) {
+    encoded.dc = state.deploymentContext
   }
 
   const jsonString = JSON.stringify(encoded)
@@ -281,6 +291,10 @@ export function decodeBuild(base64String: string): Partial<BuildState> | null {
     if (encoded.ic) {
       state.incarnonEnabled = encoded.ic.e
       state.incarnonPerks = encoded.ic.p
+    }
+
+    if (encoded.dc) {
+      state.deploymentContext = encoded.dc
     }
 
     return state

@@ -78,6 +78,11 @@ export interface Weapon extends BaseItem {
   trigger?: string
   attacks?: Attack[]
   polarities?: string[]
+  // Atmospheric (Archgun Deployer) damage profile, set only when it differs
+  // from the default Archwing-mission profile.
+  atmosphericDamage?: DamageTypes
+  atmosphericTotalDamage?: number
+  atmosphericAttacks?: Attack[]
 }
 
 export interface DamageTypes {
@@ -365,7 +370,15 @@ export interface BuildState {
   // Index 0 (tier 1) is always null — tier 1 has no choice.
   incarnonEnabled?: boolean
   incarnonPerks?: (string | null)[]
+
+  // Arch-Gun deployment context. Only meaningful for arch-guns with a
+  // divergent atmospheric damage profile.
+  deploymentContext?: DeploymentContext
 }
+
+export type DeploymentContext = "archwing" | "atmospheric"
+
+export const DEFAULT_DEPLOYMENT_CONTEXT: DeploymentContext = "atmospheric"
 
 export const LICH_BONUS_ELEMENTS = [
   "Heat",
