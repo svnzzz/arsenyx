@@ -14,12 +14,37 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    date: "2026-05-09",
+    changes: [
+      {
+        type: "fix",
+        description:
+          "Arch-gun arcane slots are now correctly typed as Primary and Secondary so the right arcanes are offered.",
+      },
+      {
+        type: "feat",
+        description:
+          "Hovering a build's timestamp shows when it was last updated.",
+      },
+    ],
+  },
+  {
     date: "2026-05-08",
     changes: [
       {
         type: "feat",
         description:
           "Item detail pages have been redesigned, and browse lists and loading skeletons got an overhaul to feel snappier.",
+      },
+      {
+        type: "feat",
+        description:
+          "Item, category, and author in the build header are now clickable links.",
+      },
+      {
+        type: "refactor",
+        description:
+          "Author links stay neutral gray; purple is now reserved for organizations.",
       },
       {
         type: "fix",
