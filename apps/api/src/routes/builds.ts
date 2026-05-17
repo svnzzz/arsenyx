@@ -1,9 +1,9 @@
 import { isValidCategory } from "@arsenyx/shared/warframe/categories"
 import { Hono, type Context } from "hono"
 import { getCookie, setCookie } from "hono/cookie"
-import { customAlphabet } from "nanoid"
+import { customAlphabet, nanoid } from "nanoid"
 
-import { prisma } from "../db"
+import { prisma, registerBackgroundWork } from "../db"
 import { Prisma } from "../generated/prisma/client"
 import { BuildVisibility } from "../generated/prisma/enums"
 import type { InputJsonValue } from "../generated/prisma/internal/prismaNamespace"
@@ -26,6 +26,11 @@ const generateSlug = customAlphabet(
   "23456789abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ",
   10,
 )
+
+// Attempts a fresh slug on @@unique collision. With a 56-char alphabet and
+// 10-char slugs the collision space is ~3e17; 5 retries is dramatically more
+// than enough.
+const SLUG_COLLISION_RETRIES = 5
 
 const MAX_NAME = 120
 const MAX_DESCRIPTION = 2000
@@ -102,7 +107,7 @@ builds.post("/", rateLimitUser("mutate"), async (c) => {
   const organizationId = orgResult.value
 
   // Retry on the astronomically-unlikely slug collision.
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < SLUG_COLLISION_RETRIES; attempt++) {
     const slug = generateSlug()
     try {
       const created = await prisma.build.create({
@@ -262,7 +267,7 @@ builds.post("/:slug/fork", rateLimitUser("mutate"), async (c) => {
 
   const forkName = `Fork of ${source.name}`.slice(0, MAX_NAME)
 
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < SLUG_COLLISION_RETRIES; attempt++) {
     const slug = generateSlug()
     try {
       const created = await prisma.build.create({
@@ -283,13 +288,7 @@ builds.post("/:slug/fork", rateLimitUser("mutate"), async (c) => {
       })
       return c.json(created, 201)
     } catch (err: unknown) {
-      if (
-        typeof err === "object" &&
-        err != null &&
-        (err as { code?: string }).code === "P2002"
-      ) {
-        continue
-      }
+      if (hasPrismaCode(err, "P2002")) continue
       throw err
     }
   }
@@ -574,26 +573,26 @@ builds.post("/:slug/like", rateLimitUser("social"), async (c) => {
     return c.json({ error: "cannot_like_own_build" }, 400)
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const existing = await tx.buildLike.findUnique({
-      where: { userId_buildId: { userId, buildId: build.id } },
-      select: { id: true },
-    })
-    if (existing) {
-      return { hasLiked: true, likeCount: build.likeCount }
-    }
-    await tx.buildLike.create({
-      data: { userId, buildId: build.id, value: 1 },
-    })
-    const rows = await tx.$queryRaw<{ likeCount: number }[]>`
-      UPDATE builds SET "likeCount" = "likeCount" + 1 WHERE id = ${build.id} RETURNING "likeCount"
-    `
-    return {
-      hasLiked: true,
-      likeCount: rows[0]?.likeCount ?? build.likeCount + 1,
-    }
+  // Single-statement CTE: INSERT … ON CONFLICT DO NOTHING avoids the
+  // findUnique+create race on rapid double-click, while the same statement
+  // bumps the counter by the number of rows actually inserted (0 or 1).
+  // Atomic — no partial-state on connection drop.
+  const rows = await prisma.$queryRaw<{ likeCount: number }[]>`
+    WITH inserted AS (
+      INSERT INTO build_likes (id, "userId", "buildId", value, "createdAt")
+      VALUES (${nanoid()}, ${userId}, ${build.id}, 1, NOW())
+      ON CONFLICT ("userId", "buildId") DO NOTHING
+      RETURNING 1
+    )
+    UPDATE builds
+    SET "likeCount" = "likeCount" + (SELECT count(*)::int FROM inserted)
+    WHERE id = ${build.id}
+    RETURNING "likeCount"
+  `
+  return c.json({
+    hasLiked: true,
+    likeCount: rows[0]?.likeCount ?? build.likeCount,
   })
-  return c.json(updated)
 })
 
 builds.delete("/:slug/like", rateLimitUser("social"), async (c) => {
@@ -604,24 +603,21 @@ builds.delete("/:slug/like", rateLimitUser("social"), async (c) => {
   const build = await getBuildForSocial(c.req.param("slug"))
   if (!build) return c.json({ error: "not_found" }, 404)
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const existing = await tx.buildLike.findUnique({
-      where: { userId_buildId: { userId, buildId: build.id } },
-      select: { id: true },
-    })
-    if (!existing) {
-      return { hasLiked: false, likeCount: build.likeCount }
-    }
-    await tx.buildLike.delete({ where: { id: existing.id } })
-    const rows = await tx.$queryRaw<{ likeCount: number }[]>`
-      UPDATE builds SET "likeCount" = "likeCount" - 1 WHERE id = ${build.id} RETURNING "likeCount"
-    `
-    return {
-      hasLiked: false,
-      likeCount: rows[0]?.likeCount ?? Math.max(0, build.likeCount - 1),
-    }
+  const rows = await prisma.$queryRaw<{ likeCount: number }[]>`
+    WITH deleted AS (
+      DELETE FROM build_likes
+      WHERE "userId" = ${userId} AND "buildId" = ${build.id}
+      RETURNING 1
+    )
+    UPDATE builds
+    SET "likeCount" = GREATEST(0, "likeCount" - (SELECT count(*)::int FROM deleted))
+    WHERE id = ${build.id}
+    RETURNING "likeCount"
+  `
+  return c.json({
+    hasLiked: false,
+    likeCount: rows[0]?.likeCount ?? build.likeCount,
   })
-  return c.json(updated)
 })
 
 builds.post("/:slug/bookmark", rateLimitUser("social"), async (c) => {
@@ -635,24 +631,22 @@ builds.post("/:slug/bookmark", rateLimitUser("social"), async (c) => {
     return c.json({ error: "not_found" }, 404)
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const existing = await tx.buildBookmark.findUnique({
-      where: { userId_buildId: { userId, buildId: build.id } },
-      select: { id: true },
-    })
-    if (existing) {
-      return { hasBookmarked: true, bookmarkCount: build.bookmarkCount }
-    }
-    await tx.buildBookmark.create({ data: { userId, buildId: build.id } })
-    const rows = await tx.$queryRaw<{ bookmarkCount: number }[]>`
-      UPDATE builds SET "bookmarkCount" = "bookmarkCount" + 1 WHERE id = ${build.id} RETURNING "bookmarkCount"
-    `
-    return {
-      hasBookmarked: true,
-      bookmarkCount: rows[0]?.bookmarkCount ?? build.bookmarkCount + 1,
-    }
+  const rows = await prisma.$queryRaw<{ bookmarkCount: number }[]>`
+    WITH inserted AS (
+      INSERT INTO build_bookmarks (id, "userId", "buildId", "createdAt")
+      VALUES (${nanoid()}, ${userId}, ${build.id}, NOW())
+      ON CONFLICT ("userId", "buildId") DO NOTHING
+      RETURNING 1
+    )
+    UPDATE builds
+    SET "bookmarkCount" = "bookmarkCount" + (SELECT count(*)::int FROM inserted)
+    WHERE id = ${build.id}
+    RETURNING "bookmarkCount"
+  `
+  return c.json({
+    hasBookmarked: true,
+    bookmarkCount: rows[0]?.bookmarkCount ?? build.bookmarkCount,
   })
-  return c.json(updated)
 })
 
 builds.delete("/:slug/bookmark", rateLimitUser("social"), async (c) => {
@@ -663,25 +657,21 @@ builds.delete("/:slug/bookmark", rateLimitUser("social"), async (c) => {
   const build = await getBuildForSocial(c.req.param("slug"))
   if (!build) return c.json({ error: "not_found" }, 404)
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const existing = await tx.buildBookmark.findUnique({
-      where: { userId_buildId: { userId, buildId: build.id } },
-      select: { id: true },
-    })
-    if (!existing) {
-      return { hasBookmarked: false, bookmarkCount: build.bookmarkCount }
-    }
-    await tx.buildBookmark.delete({ where: { id: existing.id } })
-    const rows = await tx.$queryRaw<{ bookmarkCount: number }[]>`
-      UPDATE builds SET "bookmarkCount" = "bookmarkCount" - 1 WHERE id = ${build.id} RETURNING "bookmarkCount"
-    `
-    return {
-      hasBookmarked: false,
-      bookmarkCount:
-        rows[0]?.bookmarkCount ?? Math.max(0, build.bookmarkCount - 1),
-    }
+  const rows = await prisma.$queryRaw<{ bookmarkCount: number }[]>`
+    WITH deleted AS (
+      DELETE FROM build_bookmarks
+      WHERE "userId" = ${userId} AND "buildId" = ${build.id}
+      RETURNING 1
+    )
+    UPDATE builds
+    SET "bookmarkCount" = GREATEST(0, "bookmarkCount" - (SELECT count(*)::int FROM deleted))
+    WHERE id = ${build.id}
+    RETURNING "bookmarkCount"
+  `
+  return c.json({
+    hasBookmarked: false,
+    bookmarkCount: rows[0]?.bookmarkCount ?? build.bookmarkCount,
   })
-  return c.json(updated)
 })
 
 builds.get("/:slug", async (c) => {
@@ -755,9 +745,11 @@ async function maybeIncrementView(
   if (viewerId && viewerId === ownerId) return
   const cookieName = `vw_${slug}`
   if (getCookie(c, cookieName)) return
-  await prisma.$executeRaw`
-    UPDATE builds SET "viewCount" = "viewCount" + 1 WHERE id = ${buildId}
-  `
+  registerBackgroundWork(
+    prisma.$executeRaw`
+      UPDATE builds SET "viewCount" = "viewCount" + 1 WHERE id = ${buildId}
+    `.catch((err) => console.error("view count update failed", err)),
+  )
   const isProd = process.env.NODE_ENV === "production"
   setCookie(c, cookieName, "1", {
     path: "/",
