@@ -45,8 +45,10 @@ import {
   getAuraSlotCount,
   getExilusInnatePolarity,
   getMaxLevelCap,
+  getStanceInnatePolarity,
   getNormalSlotCount,
   hasExilusSlot,
+  hasStanceSlot,
   ItemSidebar,
   ItemSidebarPopover,
   ModGrid,
@@ -351,11 +353,13 @@ function BuildViewerBodyInner({
   )
 
   const auraSlotCount = getAuraSlotCount(category, item)
+  const showStance = hasStanceSlot(item, category)
   const slots = useBuildSlots(normalSlotCount, {
     placed: saved.slots,
     formaPolarities: saved.formaPolarities,
     auraSlotCount,
     showExilus: hasExilusSlot(category),
+    showStance,
     initialSelected: null,
   })
   const arcanes = useArcaneSlots(arcaneCount, saved.arcanes)
@@ -374,6 +378,7 @@ function BuildViewerBodyInner({
     [item, auraSlotCount],
   )
   const exilusInnate = useMemo(() => getExilusInnatePolarity(item), [item])
+  const stanceInnate = useMemo(() => getStanceInnatePolarity(item), [item])
   const normalInnates = useMemo(
     () =>
       Array.from({ length: normalSlotCount }, (_, i) =>
@@ -391,10 +396,17 @@ function BuildViewerBodyInner({
       calculateFormaCount({
         auraInnates,
         exilusInnate,
+        stanceInnate,
         normalInnates,
         formaPolarities: slots.formaPolarities,
       }),
-    [auraInnates, exilusInnate, normalInnates, slots.formaPolarities],
+    [
+      auraInnates,
+      exilusInnate,
+      stanceInnate,
+      normalInnates,
+      slots.formaPolarities,
+    ],
   )
   const capacity = useMemo(
     () =>
@@ -403,6 +415,7 @@ function BuildViewerBodyInner({
         formaPolarities: slots.formaPolarities,
         auraInnates,
         exilusInnate,
+        stanceInnate,
         normalInnates,
         hasReactor,
         maxLevelCap: getMaxLevelCap(category, item),
@@ -412,6 +425,7 @@ function BuildViewerBodyInner({
       slots.formaPolarities,
       auraInnates,
       exilusInnate,
+      stanceInnate,
       normalInnates,
       hasReactor,
       category,

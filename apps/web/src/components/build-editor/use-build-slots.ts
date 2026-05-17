@@ -1,9 +1,10 @@
+import { isStanceMod } from "@arsenyx/shared/warframe/mods"
 import type { Mod, Polarity } from "@arsenyx/shared/warframe/types"
 import { useCallback, useMemo, useState } from "react"
 
 import type { ModSlotKind } from "./mod-slot"
 
-export type SlotId = `aura-${number}` | "exilus" | `normal-${number}`
+export type SlotId = `aura-${number}` | "exilus" | "stance" | `normal-${number}`
 
 export interface PlacedMod {
   mod: Mod
@@ -18,9 +19,10 @@ export function isExilusCompatible(mod: Mod): boolean {
   return Boolean(mod.isExilus || mod.isUtility)
 }
 
-function slotKind(id: SlotId): ModSlotKind {
+export function slotKind(id: SlotId): ModSlotKind {
   if (id.startsWith("aura-")) return "aura"
   if (id === "exilus") return "exilus"
+  if (id === "stance") return "stance"
   return "normal"
 }
 
@@ -29,9 +31,11 @@ export function canPlaceIn(mod: Mod, id: SlotId): boolean {
     case "aura":
       return isAuraMod(mod)
     case "exilus":
-      return !isAuraMod(mod) && isExilusCompatible(mod)
+      return !isAuraMod(mod) && !isStanceMod(mod) && isExilusCompatible(mod)
+    case "stance":
+      return isStanceMod(mod)
     case "normal":
-      return !isAuraMod(mod)
+      return !isAuraMod(mod) && !isStanceMod(mod)
   }
 }
 
@@ -39,21 +43,32 @@ function maxRank(mod: Mod): number {
   return mod.fusionLimit ?? 0
 }
 
+function candidateSlots(
+  mod: Mod,
+  auraIds: SlotId[],
+  normalIds: SlotId[],
+): SlotId[] {
+  if (isAuraMod(mod)) return auraIds
+  if (isStanceMod(mod)) return ["stance"]
+  if (isExilusCompatible(mod)) return ["exilus", ...normalIds]
+  return normalIds
+}
+
 export interface SlotLayout {
   normalSlotCount: number
   auraSlotCount: number
   showExilus: boolean
+  showStance: boolean
 }
 
 /**
  * Ordered list of visible slots in reading order:
- * aura-0, exilus?, aura-1..N-1, normal-0..N.
- * Exilus sits between the first and second aura so the top row reads
- * `Aura | Exilus | Aura` for Jade (two auras), or `Aura | Exilus` otherwise.
+ * aura-0, stance?, exilus?, aura-1..N-1, normal-0..N.
  */
 export function getVisibleSlots(layout: SlotLayout): SlotId[] {
   const out: SlotId[] = []
   if (layout.auraSlotCount > 0) out.push("aura-0")
+  if (layout.showStance) out.push("stance")
   if (layout.showExilus) out.push("exilus")
   for (let i = 1; i < layout.auraSlotCount; i++) {
     out.push(`aura-${i}` as SlotId)
@@ -110,6 +125,7 @@ export function useBuildSlots(
     formaPolarities?: Partial<Record<SlotId, Polarity>>
     auraSlotCount?: number
     showExilus?: boolean
+    showStance?: boolean
     /** Set to null for read-only views that shouldn't start with a focused slot. */
     initialSelected?: SlotId | null
   },
@@ -129,6 +145,7 @@ export function useBuildSlots(
     normalSlotCount,
     auraSlotCount,
     showExilus: initial?.showExilus ?? false,
+    showStance: initial?.showStance ?? false,
   }
 
   const place = useCallback(
@@ -151,11 +168,7 @@ export function useBuildSlots(
           { length: normalSlotCount },
           (_, i) => `normal-${i}` as SlotId,
         )
-        const tryIds: SlotId[] = isAuraMod(mod)
-          ? auraIds
-          : isExilusCompatible(mod)
-            ? ["exilus", ...normalIds]
-            : normalIds
+        const tryIds = candidateSlots(mod, auraIds, normalIds)
 
         for (const id of tryIds) {
           if (!prev[id] && canPlaceIn(mod, id)) {
@@ -169,7 +182,13 @@ export function useBuildSlots(
     // layout is derived from `initial` options that are stable per editor
     // mount; no need to include every field.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [normalSlotCount, selected, layout.auraSlotCount, layout.showExilus],
+    [
+      normalSlotCount,
+      selected,
+      layout.auraSlotCount,
+      layout.showExilus,
+      layout.showStance,
+    ],
   )
 
   const placeAt = useCallback((id: SlotId, mod: Mod, rank?: number) => {

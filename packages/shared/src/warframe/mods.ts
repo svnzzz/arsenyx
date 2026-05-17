@@ -104,8 +104,16 @@ function isPistolMod(compatName: string, modType: string) {
   )
 }
 
-function isMeleeMod(compatName: string, modType: string) {
-  return compatName === "melee" || modType.includes("melee")
+export function isStanceMod(mod: Pick<Mod, "type">): boolean {
+  return mod.type?.toLowerCase() === "stance mod"
+}
+
+function isMeleeCompat(compatName: string, modType: string) {
+  return (
+    compatName === "melee" ||
+    modType.includes("melee") ||
+    modType === "stance mod"
+  )
 }
 
 const PRIMARY_SUBTYPES = ["rifle", "shotgun", "sniper", "launcher", "bow"]
@@ -131,7 +139,7 @@ function modMatchesCompat(mod: Mod, compatibility: ModCompatibility): boolean {
     case "Pistol":
       return compatName === "pistol" || modType.includes("secondary")
     case "Melee":
-      return compatName === "melee" || modType.includes("melee")
+      return isMeleeCompat(compatName, modType)
     case "Companion":
       return (
         modType.includes("companion") ||
@@ -167,11 +175,18 @@ const CATEGORY_TO_COMPAT: Record<string, ModCompatibility[]> = {
  * normalized via `normalizeMods`.
  */
 export function getModsForItem(
-  item: { type?: string; category?: string; name?: string; trigger?: string },
+  item: {
+    type?: string
+    category?: string
+    name?: string
+    trigger?: string
+    meleeClass?: string
+  },
   mods: Mod[],
 ): Mod[] {
   const itemType = item.type
   const itemName = item.name
+  const meleeClass = item.meleeClass?.toLowerCase()
 
   if (!itemType) {
     const category = item.category?.toLowerCase()
@@ -212,13 +227,19 @@ export function getModsForItem(
     }
 
     if (itemTypeLower === "melee") {
+      // Stance mods are class-specific (Polearms, Glaives, ...). When we know
+      // the weapon's class, only offer stances matching it; fail open if not.
+      if (modType === "stance mod") {
+        if (!meleeClass) return true
+        return compatName === meleeClass
+      }
       if (
         modType.includes("melee") &&
         compatName &&
         itemNameLower.includes(compatName)
       )
         return true
-      return isMeleeMod(compatName, modType)
+      return isMeleeCompat(compatName, modType)
     }
 
     if (itemTypeLower === "arch-gun")
@@ -232,7 +253,7 @@ export function getModsForItem(
       if (itemNameLower.includes("bow"))
         return isPrimaryMod(compatName, modType, "bow")
       if (item.trigger) return isPistolMod(compatName, modType)
-      return isMeleeMod(compatName, modType)
+      return isMeleeCompat(compatName, modType)
     }
 
     if (itemTypeLower === "warframe") {

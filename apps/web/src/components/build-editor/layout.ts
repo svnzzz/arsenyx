@@ -85,6 +85,21 @@ export function hasExilusSlot(category: BrowseCategory): boolean {
 }
 
 /**
+ * Whether to render a Stance slot. Driven by the item carrying a
+ * `stancePolarity` (set by WFCD on every melee and on some exalted melees).
+ * Arch-melee weapons do not carry stancePolarity and so get no slot.
+ * Exalted melees have a stance pre-applied in-game and the player cannot
+ * swap it, so we skip the slot entirely for the `exalted-weapons` category.
+ */
+export function hasStanceSlot(
+  item: Pick<DetailItem, "stancePolarity">,
+  category: BrowseCategory,
+): boolean {
+  if (category === "exalted-weapons") return false
+  return Boolean(item.stancePolarity)
+}
+
+/**
  * Number of Aura slots for an item. Warframes derive from `item.aura` —
  * an array means multiple aura slots (Jade: 2). Companions and other
  * categories have none.
