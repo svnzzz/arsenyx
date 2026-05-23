@@ -9,6 +9,7 @@ import { banGuard, originGuard } from "./middleware/security"
 import { isPrismaNotFound } from "./routes/_admin"
 import { admin } from "./routes/admin"
 import { builds } from "./routes/builds"
+import { img } from "./routes/img"
 import { imports } from "./routes/imports"
 import { me } from "./routes/me"
 import { orgs } from "./routes/orgs"
@@ -53,9 +54,11 @@ const anonRead = rateLimitAnonRead()
 app.use("/builds/*", anonRead)
 app.use("/orgs/*", anonRead)
 app.use("/users/*", anonRead)
+app.use("/img/*", anonRead)
 
 app.route("/admin", admin)
 app.route("/builds", builds)
+app.route("/img", img)
 app.route("/imports", imports)
 app.route("/me", me)
 app.route("/orgs", orgs)

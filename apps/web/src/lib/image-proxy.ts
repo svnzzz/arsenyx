@@ -1,27 +1,23 @@
-// Wraps a user-supplied image URL with Cloudflare Image Resizing so the
-// browser fetches the asset from our own origin rather than the third-party
-// host. Without the proxy, an org/profile admin could point `image` at a
-// server they control and silently log every visitor's IP and Referer when
-// the avatar loads. The proxy also gives us free format negotiation (avif/
-// webp) and on-the-fly resizing.
+import { API_URL } from "./constants"
+
+// Wraps a user-supplied image URL so the browser fetches it from our own API
+// origin rather than the third-party host. Without the proxy, an org/profile
+// admin could point `image` at a server they control and silently log every
+// visitor's IP and Referer when the avatar loads.
 //
-// URL shape (CF docs):
-//   /cdn-cgi/image/<comma-separated-options>/<source-url>
-//
-// Image Resizing must be enabled on the zone (Cloudflare dashboard →
-// Speed → Optimization). In local dev or when the feature is disabled,
-// Cloudflare returns the source URL unchanged, so this stays safe-by-default
-// behaviour-wise but DOES leak the visitor IP in those environments.
+// We originally targeted Cloudflare's /cdn-cgi/image/... endpoint, but the
+// free plan only supports it for assets stored in Cloudflare Images — for
+// arbitrary external URLs CF returns 403. We now route through a tiny Hono
+// handler at `${API_URL}/img?u=<encoded>` (see apps/api/src/routes/img.ts)
+// that fetches server-side, enforces a size cap, and refuses non-image
+// content types. The width/height/fit params are accepted for API stability
+// but currently unused — the proxy returns the source bytes verbatim.
 
 type ProxyOptions = {
-  /** Target render size in CSS pixels (CF will pick 1x/2x via dpr). */
   width?: number
   height?: number
-  /** "cover" matches our existing object-cover usage. */
   fit?: "cover" | "contain" | "scale-down" | "crop"
 }
-
-const DEFAULT_OPTIONS: Required<Pick<ProxyOptions, "fit">> = { fit: "cover" }
 
 function isProxyable(src: string): boolean {
   // Only proxy absolute http(s) URLs. data:, blob:, and relative paths
@@ -31,24 +27,9 @@ function isProxyable(src: string): boolean {
 
 export function proxyImage(
   src: string | null | undefined,
-  opts: ProxyOptions = {},
+  _opts: ProxyOptions = {},
 ): string | null {
   if (!src) return null
   if (!isProxyable(src)) return src
-
-  const parts: string[] = [
-    `fit=${opts.fit ?? DEFAULT_OPTIONS.fit}`,
-    "format=auto",
-  ]
-  if (opts.width) parts.push(`width=${opts.width}`)
-  if (opts.height) parts.push(`height=${opts.height}`)
-  // dpr=2 lets the browser pick a sharper variant on high-density screens
-  // without us having to wire up srcset for every avatar callsite.
-  parts.push("dpr=2")
-
-  // Source URLs are encoded so that `?`, `#`, and `..` inside them survive
-  // browser URL parsing. Without this, Discord (`?ex=…&hm=…&is=…`) and
-  // GitHub avatar (`?v=4`) URLs lose their query string before reaching
-  // Cloudflare, and `..` segments get path-normalised into garbage.
-  return `/cdn-cgi/image/${parts.join(",")}/${encodeURIComponent(src)}`
+  return `${API_URL}/img?u=${encodeURIComponent(src)}`
 }
