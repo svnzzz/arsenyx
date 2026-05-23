@@ -1,7 +1,13 @@
-import { isStanceMod } from "@arsenyx/shared/warframe/mods"
+import {
+  getPlexusSlotKind,
+  isPlexusAuraMod as sharedIsPlexusAuraMod,
+  isPlexusMod as sharedIsPlexusMod,
+  isStanceMod,
+} from "@arsenyx/shared/warframe/mods"
 import type { Mod, Polarity } from "@arsenyx/shared/warframe/types"
 import { useCallback, useMemo, useState } from "react"
 
+import { getPlexusGroupForIndex } from "./layout"
 import type { ModSlotKind } from "./mod-slot"
 
 export type SlotId = `aura-${number}` | "exilus" | "stance" | `normal-${number}`
@@ -15,6 +21,11 @@ export function isAuraMod(mod: Mod): boolean {
   return mod.compatName?.toUpperCase() === "AURA"
 }
 
+// Re-exported from shared so callers in the build editor can keep
+// importing from this module. Casing-tolerant — see shared/mods.ts.
+export const isPlexusMod = sharedIsPlexusMod
+export const isPlexusAuraMod = sharedIsPlexusAuraMod
+
 export function isExilusCompatible(mod: Mod): boolean {
   return Boolean(mod.isExilus || mod.isUtility)
 }
@@ -26,7 +37,31 @@ export function slotKind(id: SlotId): ModSlotKind {
   return "normal"
 }
 
+/** For a normal-N slot id, return the Plexus group ("battle" | "tactical" |
+ * "integrated") that index falls into. Null for non-normal-N ids or for
+ * indices outside PLEXUS_GROUPS' range. */
+function plexusGroupForSlot(
+  id: SlotId,
+): "battle" | "tactical" | "integrated" | null {
+  const m = /^normal-(\d+)$/.exec(id)
+  if (!m) return null
+  return getPlexusGroupForIndex("railjack", Number(m[1]))
+}
+
 export function canPlaceIn(mod: Mod, id: SlotId): boolean {
+  // Plexus mods don't carry `compatName: "AURA"`. Aura/Matrix mods (negative
+  // baseDrain) only fit the Aura slot; regular Plexus mods only fit a normal
+  // slot whose Plexus group (Battle/Tactical/Integrated) matches the mod's.
+  // Neither variety ever goes in exilus/stance.
+  if (isPlexusMod(mod)) {
+    const k = slotKind(id)
+    if (isPlexusAuraMod(mod)) return k === "aura"
+    if (k !== "normal") return false
+    const modGroup = getPlexusSlotKind(mod)
+    const slotGroup = plexusGroupForSlot(id)
+    if (!modGroup || !slotGroup) return false
+    return modGroup === slotGroup
+  }
   switch (slotKind(id)) {
     case "aura":
       return isAuraMod(mod)
@@ -48,6 +83,15 @@ function candidateSlots(
   auraIds: SlotId[],
   normalIds: SlotId[],
 ): SlotId[] {
+  // Plexus mods route by sub-kind. Aura/Matrix → aura slot only; regular
+  // Plexus mods → only the normal slots whose group matches the mod's group.
+  // (canPlaceIn enforces the same constraint at placement time.)
+  if (isPlexusMod(mod)) {
+    if (isPlexusAuraMod(mod)) return auraIds
+    const modGroup = getPlexusSlotKind(mod)
+    if (!modGroup) return []
+    return normalIds.filter((id) => plexusGroupForSlot(id) === modGroup)
+  }
   if (isAuraMod(mod)) return auraIds
   if (isStanceMod(mod)) return ["stance"]
   if (isExilusCompatible(mod)) return ["exilus", ...normalIds]
