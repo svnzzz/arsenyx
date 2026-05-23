@@ -13,7 +13,7 @@ import type {
 } from "@arsenyx/shared/warframe/types"
 
 import type { PlacedArcane, PlacedMod, SlotId } from "@/components/build-editor"
-import type { SavedBuildData } from "@/lib/build-query"
+import type { SavedBuildData, SavedVariant } from "@/lib/build-query"
 import type { HelminthAbility } from "@/lib/helminth-query"
 import type { PlacedShard } from "@/lib/shards"
 
@@ -280,6 +280,73 @@ export function normalizeBuildData(
   return refreshHelminthImage(base, helminthAbilities)
 }
 
+// Synthetic single-variant identity used when a legacy / single-loadout build
+// has no `variants` array. Save logic compares against these to decide whether
+// emitting `variants` would just re-persist the synthetic placeholder.
+export const SYNTHETIC_VARIANT_ID = "v0"
+export const SYNTHETIC_VARIANT_LABEL = "Main"
+
+export function isSyntheticVariant(v: SavedVariant): boolean {
+  return v.id === SYNTHETIC_VARIANT_ID && v.label === SYNTHETIC_VARIANT_LABEL
+}
+
+/**
+ * Returns the variants array, or a single synthetic "Main" variant
+ * synthesized from the top-level fields when the build has no
+ * `variants`. Always returns at least one entry.
+ */
+export function getVariants(data: SavedBuildData): SavedVariant[] {
+  if (data.variants && data.variants.length > 0) return data.variants
+  return [
+    {
+      id: SYNTHETIC_VARIANT_ID,
+      label: SYNTHETIC_VARIANT_LABEL,
+      slots: data.slots ?? {},
+      arcanes: data.arcanes ?? [],
+      helminth: data.helminth,
+      incarnonEnabled: data.incarnonEnabled,
+      incarnonPerks: data.incarnonPerks,
+      deploymentContext: data.deploymentContext,
+    },
+  ]
+}
+
+/**
+ * Project a single variant back into a `SavedBuildData` shape that the
+ * existing viewer/editor pipelines consume unchanged. Shared fields
+ * (shards, forma, reactor, helminth, lich, zaw, name) come from the
+ * top-level doc; per-variant fields override.
+ */
+export function selectVariant(
+  data: SavedBuildData,
+  index: number,
+): SavedBuildData {
+  const variants = getVariants(data)
+  const clamped =
+    index < 0
+      ? 0
+      : index >= variants.length
+        ? variants.length - 1
+        : Math.floor(index)
+  const v = variants[clamped]
+  // Per-variant fields come from `v` verbatim. No fallback to top-level —
+  // top-level mirrors whichever variant was active at save time, so falling
+  // back would leak that variant's state into other variants that happen to
+  // have undefined fields. Legacy single-variant docs are safe because
+  // getVariants() already populates the synthetic variant from top-level.
+  return {
+    ...data,
+    slots: v.slots,
+    arcanes: v.arcanes,
+    helminth: v.helminth,
+    incarnonEnabled: v.incarnonEnabled,
+    incarnonPerks: v.incarnonPerks,
+    deploymentContext: v.deploymentContext,
+    // formaPolarities, shards, hasReactor, zaw, lich, buildName are
+    // shared across variants and stay as-is.
+  }
+}
+
 // Older builds were saved when wfcd shipped content-hashed image filenames
 // (e.g. `roar-e206197372.png`); the newer `@wfcd/items` package uses canonical
 // names and the upstream CDN no longer maps the old hashed slugs. Mods and
@@ -290,16 +357,33 @@ function refreshHelminthImage(
   data: SavedBuildData,
   helminthAbilities: HelminthAbility[],
 ): SavedBuildData {
-  if (!data.helminth || helminthAbilities.length === 0) return data
+  if (helminthAbilities.length === 0) return data
   const byUnique = new Map(helminthAbilities.map((h) => [h.uniqueName, h]))
-  const next: Record<number, HelminthAbility> = {}
-  for (const [slotIndex, ability] of Object.entries(data.helminth)) {
-    const fresh = byUnique.get(ability.uniqueName)
-    next[Number(slotIndex)] = fresh
-      ? { ...ability, imageName: fresh.imageName }
-      : ability
+  const refreshOne = (
+    helminth: Record<number, HelminthAbility>,
+  ): Record<number, HelminthAbility> => {
+    const next: Record<number, HelminthAbility> = {}
+    for (const [slotIndex, ability] of Object.entries(helminth)) {
+      const fresh = byUnique.get(ability.uniqueName)
+      next[Number(slotIndex)] = fresh
+        ? { ...ability, imageName: fresh.imageName }
+        : ability
+    }
+    return next
   }
-  return { ...data, helminth: next }
+  let result = data
+  if (data.helminth) {
+    result = { ...result, helminth: refreshOne(data.helminth) }
+  }
+  if (data.variants && data.variants.length > 0) {
+    result = {
+      ...result,
+      variants: data.variants.map((v) =>
+        v.helminth ? { ...v, helminth: refreshOne(v.helminth) } : v,
+      ),
+    }
+  }
+  return result
 }
 
 /**
