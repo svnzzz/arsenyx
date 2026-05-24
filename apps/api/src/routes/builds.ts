@@ -759,6 +759,53 @@ builds.delete("/:slug/bookmark", rateLimitUser("social"), async (c) => {
 builds.get("/:slug", async (c) => {
   const slug = c.req.param("slug")
 
+  // Fast path for the link-unfurl Worker (apps/web/worker/index.ts): skip the
+  // heavy `buildData` JSON column, the guide body, the session lookup, and
+  // the viewer-state queries. Only PUBLIC / UNLISTED builds are visible
+  // anonymously, and the Worker further filters to PUBLIC before injecting
+  // meta. This shrinks the edge-cached payload by ~10–50× for embeds.
+  if (c.req.query("embed") === "1") {
+    const slim = await prisma.build.findUnique({
+      where: { slug },
+      select: {
+        slug: true,
+        name: true,
+        description: true,
+        visibility: true,
+        hideAuthor: true,
+        likeCount: true,
+        viewCount: true,
+        itemName: true,
+        itemCategory: true,
+        itemImageName: true,
+        user: { select: { name: true, username: true, displayUsername: true } },
+        organization: { select: { name: true } },
+        buildGuide: { select: { summary: true } },
+      },
+    })
+    if (
+      !slim ||
+      (slim.visibility !== "PUBLIC" && slim.visibility !== "UNLISTED")
+    )
+      return c.json({ error: "not_found" }, 404)
+    return c.json({
+      name: slim.name,
+      description: slim.description,
+      visibility: slim.visibility,
+      hideAuthor: slim.hideAuthor,
+      likeCount: slim.likeCount,
+      viewCount: slim.viewCount,
+      item: {
+        name: slim.itemName,
+        category: slim.itemCategory,
+        imageName: slim.itemImageName,
+      },
+      user: slim.user,
+      organization: slim.organization,
+      guide: slim.buildGuide ? { summary: slim.buildGuide.summary } : null,
+    })
+  }
+
   const [session, build] = await Promise.all([
     getSession(c),
     prisma.build.findUnique({
@@ -825,6 +872,12 @@ async function maybeIncrementView(
   ownerId: string,
 ) {
   if (viewerId && viewerId === ownerId) return
+  // The link-unfurl Worker (apps/web/worker/index.ts) appends ?embed=1 when it
+  // hydrates OG meta tags for bot scrapes. Those calls forward no cookies, so
+  // without this guard every Discord/Slack/Twitter unfurl would inflate
+  // viewCount — and the Set-Cookie we'd attach would also defeat the Worker's
+  // edge cache. Skip the side effect (and the cookie) entirely.
+  if (c.req.query("embed") === "1") return
   const cookieName = `vw_${slug}`
   if (getCookie(c, cookieName)) return
   registerBackgroundWork(
