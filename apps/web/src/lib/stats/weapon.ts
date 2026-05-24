@@ -3,6 +3,7 @@ import type {
   DamageTypes,
   DeploymentContext,
   Gun,
+  LichBonusElement,
   Melee,
   Weapon,
 } from "@arsenyx/shared/warframe/types"
@@ -41,6 +42,23 @@ export interface WeaponCalcInput {
    * without atmospheric overrides.
    */
   deploymentContext?: DeploymentContext
+  /**
+   * Kuva/Tenet progenitor bonus element. Adds a flat +60% of the chosen
+   * element as if it were a mod stat, so it combines with mod elements
+   * (e.g. Cold + bonus Toxin → Viral).
+   */
+  lichBonusElement?: LichBonusElement | null
+}
+
+const LICH_BONUS_PERCENT = 60
+
+function lichBonusStat(element: LichBonusElement): SourcedStat {
+  return {
+    type: element.toLowerCase() as SourcedStat["type"],
+    value: LICH_BONUS_PERCENT,
+    operation: "percent_add",
+    sourceName: "Bonus Element",
+  }
 }
 
 export function calculateWeaponStats(input: WeaponCalcInput): WeaponStats {
@@ -48,6 +66,9 @@ export function calculateWeaponStats(input: WeaponCalcInput): WeaponStats {
   const stats = collectSourcedStats(input.mods, input.arcanes, {
     showMaxStacks: input.showMaxStacks,
   })
+  if (input.lichBonusElement) {
+    stats.push(lichBonusStat(input.lichBonusElement))
+  }
 
   const multishot = calcStat("multishot", 1, stats)
   const hasAttacks = Boolean(weapon.attacks && weapon.attacks.length > 0)
@@ -392,6 +413,30 @@ function calcDamageBreakdown(
     totalModdedBase,
     baseDamageContribs,
   )
+
+  // Dedupe entries of the same type that survived combineElements (e.g.
+  // innate Cold + modded Cold with no other element to pair with). Done
+  // post-combination so the "innates pair last with leftovers" ordering
+  // still applies: modded Cold + Heat → Blast first, then any leftover
+  // innate Cold gets merged with other Cold entries here.
+  const dedupedByType = new Map<DamageType, DamageEntry>()
+  const deduped: DamageEntry[] = []
+  for (const entry of elemental) {
+    const existing = dedupedByType.get(entry.type)
+    if (existing) {
+      existing.value = round1(existing.value + entry.value)
+      existing.contributions.push(...entry.contributions)
+    } else {
+      const cloned: DamageEntry = {
+        ...entry,
+        contributions: [...entry.contributions],
+      }
+      dedupedByType.set(entry.type, cloned)
+      deduped.push(cloned)
+    }
+  }
+  elemental.length = 0
+  elemental.push(...deduped)
 
   // Combined-element stats from mods/rivens/arcanes (e.g. a Riven rolling
   // +Magnetic Damage). These don't combine further, so emit them directly.
