@@ -18,6 +18,7 @@ import {
   getShardImageUrl,
   SHARD_COLOR_NAMES,
   SHARD_COLORS,
+  SHARD_CSS_COLORS,
   SHARD_STATS,
   type PlacedShard,
   type ShardColor,
@@ -34,6 +35,9 @@ export function ShardSlot({
   readOnly?: boolean
 }) {
   const [open, setOpen] = useState(false)
+  const stat = shard
+    ? (SHARD_STATS[shard.color].find((s) => s.name === shard.stat) ?? null)
+    : null
   const triggerButton = (
     <button
       type="button"
@@ -75,10 +79,14 @@ export function ShardSlot({
           {shard ? (
             <>
               <p className="font-semibold">
-                {SHARD_COLOR_NAMES[shard.color]}
-                {shard.tauforged ? " (Tauforged)" : ""}
+                {shard.tauforged ? "Tauforged " : ""}
+                <span style={{ color: SHARD_CSS_COLORS[shard.color] }}>
+                  {SHARD_COLOR_NAMES[shard.color]}
+                </span>
               </p>
-              <p className="text-muted-foreground mt-0.5">{shard.stat}</p>
+              <p className="text-muted-foreground mt-0.5 text-xs">
+                {shard.stat}
+              </p>
             </>
           ) : (
             <span className="text-muted-foreground">Empty shard slot</span>
@@ -86,7 +94,11 @@ export function ShardSlot({
         </TooltipContent>
       </Tooltip>
       {(!readOnly || shard) && (
-        <PopoverContent side="right" align="start" className="w-72">
+        <PopoverContent
+          side={readOnly ? "bottom" : "right"}
+          align={readOnly ? "center" : "start"}
+          className={readOnly ? "w-64" : "w-72"}
+        >
           {readOnly && shard ? (
             <div className="flex items-center gap-2.5">
               <img
@@ -96,10 +108,15 @@ export function ShardSlot({
               />
               <div>
                 <p className="text-sm font-semibold">
-                  {SHARD_COLOR_NAMES[shard.color]}
-                  {shard.tauforged ? " (Tauforged)" : ""}
+                  {shard.tauforged ? "Tauforged " : ""}
+                  <span style={{ color: SHARD_CSS_COLORS[shard.color] }}>
+                    {SHARD_COLOR_NAMES[shard.color]}
+                  </span>
                 </p>
-                <p className="text-muted-foreground text-xs">{shard.stat}</p>
+                <p className="text-muted-foreground text-xs">
+                  {shard.stat}
+                  {stat ? ` · ${formatStatValue(stat, shard.tauforged)}` : ""}
+                </p>
               </div>
             </div>
           ) : (

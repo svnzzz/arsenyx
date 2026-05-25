@@ -1,6 +1,7 @@
 import { getIncarnonBaseName } from "@arsenyx/shared/warframe/incarnon-data"
 import { slugify } from "@arsenyx/shared/warframe/slugs"
 import {
+  type Arcane,
   DEFAULT_DEPLOYMENT_CONTEXT,
   type LichBonusElement,
   type Mod,
@@ -25,7 +26,6 @@ import {
   Link2,
   MoreHorizontal,
   Pencil,
-  Plus,
   Share2,
   Trash2,
   Zap,
@@ -56,9 +56,11 @@ import {
   useArcaneSlots,
   useBuildSlots,
 } from "@/components/build-editor"
+import { ShardSlot } from "@/components/build-editor/shard-controls"
 import { Footer } from "@/components/footer"
 import { Header } from "@/components/header"
 import { MarkdownBody } from "@/components/markdown-body"
+import { RouteNotFound } from "@/components/route-not-found"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -106,15 +108,7 @@ import {
   type PartnerBuild,
 } from "@/lib/partner-builds-query"
 import { formatAbsoluteTime, relativeTime } from "@/lib/relative-time"
-import {
-  formatStatValue,
-  getShardImageUrl,
-  padShards,
-  SHARD_COLOR_NAMES,
-  SHARD_CSS_COLORS,
-  SHARD_STATS,
-  type PlacedShard,
-} from "@/lib/shards"
+import { padShards, type PlacedShard } from "@/lib/shards"
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard"
 import { authorName, formatVisibility } from "@/lib/user-display"
 import { cn } from "@/lib/utils"
@@ -1163,7 +1157,7 @@ function EmbedWarframeStrip({
         )}
         <div className="flex shrink-0 items-center gap-1.5">
           {shards.slice(0, 5).map((shard, i) => (
-            <EmbedShardSlot key={i} shard={shard} />
+            <ShardSlot key={i} shard={shard} onPick={() => {}} readOnly />
           ))}
         </div>
       </div>
@@ -1233,83 +1227,6 @@ function EmbedAbilityIcon({
       <PopoverContent side="bottom" align="center" className="max-w-xs p-3">
         {tooltipContent}
       </PopoverContent>
-    </Popover>
-  )
-}
-
-function EmbedShardSlot({ shard }: { shard: PlacedShard | null }) {
-  const [open, setOpen] = useState(false)
-  const stat = shard
-    ? (SHARD_STATS[shard.color].find((s) => s.name === shard.stat) ?? null)
-    : null
-  const triggerEl = (
-    <div
-      className={cn(
-        "relative flex size-10 items-center justify-center rounded-sm border",
-        shard
-          ? "bg-muted/40 border-border"
-          : "border-muted-foreground/10 border-dashed",
-      )}
-    >
-      {shard ? (
-        <img
-          src={getShardImageUrl(shard.color, shard.tauforged)}
-          alt=""
-          className="size-9"
-        />
-      ) : (
-        <Plus className="text-muted-foreground/20 size-4" />
-      )}
-    </div>
-  )
-  return (
-    <Popover open={open} onOpenChange={shard ? setOpen : undefined}>
-      <Tooltip>
-        <TooltipTrigger
-          render={shard ? <PopoverTrigger render={triggerEl} /> : triggerEl}
-        />
-        <TooltipContent side="bottom">
-          {shard ? (
-            <>
-              <p className="font-semibold">
-                {shard.tauforged ? "Tauforged " : ""}
-                <span style={{ color: SHARD_CSS_COLORS[shard.color] }}>
-                  {SHARD_COLOR_NAMES[shard.color]}
-                </span>
-              </p>
-              <p className="text-muted-foreground mt-0.5 text-xs">
-                {shard.stat}
-                {stat ? ` · ${formatStatValue(stat, shard.tauforged)}` : ""}
-              </p>
-            </>
-          ) : (
-            <span className="text-muted-foreground">Empty shard slot</span>
-          )}
-        </TooltipContent>
-      </Tooltip>
-      {shard && (
-        <PopoverContent side="bottom" align="center" className="w-64 p-3">
-          <div className="flex items-center gap-2.5">
-            <img
-              src={getShardImageUrl(shard.color, shard.tauforged)}
-              alt=""
-              className="size-10 shrink-0"
-            />
-            <div>
-              <p className="text-sm font-semibold">
-                {shard.tauforged ? "Tauforged " : ""}
-                <span style={{ color: SHARD_CSS_COLORS[shard.color] }}>
-                  {SHARD_COLOR_NAMES[shard.color]}
-                </span>
-              </p>
-              <p className="text-muted-foreground text-xs">
-                {shard.stat}
-                {stat ? ` · ${formatStatValue(stat, shard.tauforged)}` : ""}
-              </p>
-            </div>
-          </div>
-        </PopoverContent>
-      )}
     </Popover>
   )
 }
@@ -1579,15 +1496,9 @@ function EmbedLichStrip({
 
 function BuildNotFound() {
   return (
-    <div className="relative flex min-h-screen flex-col">
-      <Header />
-      <main className="wrap flex flex-1 flex-col items-center justify-center gap-3 py-12">
-        <h1 className="text-2xl font-semibold">Build not found</h1>
-        <p className="text-muted-foreground">
-          This build may have been deleted or is private.
-        </p>
-      </main>
-      <Footer />
-    </div>
+    <RouteNotFound
+      title="Build not found"
+      message="This build may have been deleted or is private."
+    />
   )
 }

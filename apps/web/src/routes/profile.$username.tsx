@@ -11,6 +11,7 @@ import {
 import { DelayedSuspense } from "@/components/delayed-fallback"
 import { Footer } from "@/components/footer"
 import { Header } from "@/components/header"
+import { RouteNotFound } from "@/components/route-not-found"
 import { Badge } from "@/components/ui/badge"
 import { UserAvatar } from "@/components/user-avatar"
 import { type BuildListSort } from "@/lib/builds-list-query"
@@ -19,6 +20,7 @@ import {
   profileQuery,
   type Profile,
 } from "@/lib/profile-query"
+import { authorName } from "@/lib/user-display"
 import { type BrowseCategory } from "@/lib/warframe"
 
 type ProfileSearch = {
@@ -98,8 +100,7 @@ function ProfileContent() {
 }
 
 function ProfileHeader({ profile }: { profile: Profile }) {
-  const display =
-    profile.displayUsername ?? profile.username ?? profile.name ?? "User"
+  const display = authorName(profile, "User")
   const handle = profile.username ? `@${profile.username}` : null
   const joined = new Date(profile.joinedAt).toLocaleDateString(undefined, {
     year: "numeric",
@@ -184,15 +185,9 @@ function ProfileBadges({ badges }: { badges: Profile["badges"] }) {
 
 function ProfileNotFound() {
   return (
-    <div className="relative flex min-h-screen flex-col">
-      <Header />
-      <main className="wrap flex flex-1 flex-col items-center justify-center gap-3 py-12">
-        <h1 className="text-2xl font-semibold">User not found</h1>
-        <p className="text-muted-foreground">
-          This profile may not exist or has been deleted.
-        </p>
-      </main>
-      <Footer />
-    </div>
+    <RouteNotFound
+      title="User not found"
+      message="This profile may not exist or has been deleted."
+    />
   )
 }

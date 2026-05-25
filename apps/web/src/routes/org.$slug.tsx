@@ -13,11 +13,13 @@ import { DelayedSuspense } from "@/components/delayed-fallback"
 import { Footer } from "@/components/footer"
 import { Header } from "@/components/header"
 import { Link } from "@/components/link"
+import { RouteNotFound } from "@/components/route-not-found"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { UserAvatar } from "@/components/user-avatar"
 import { type BuildListSort } from "@/lib/builds-list-query"
 import { orgBuildsQuery, orgQuery, type OrgProfile } from "@/lib/org-query"
+import { authorName } from "@/lib/user-display"
 import { type BrowseCategory } from "@/lib/warframe"
 
 type OrgSearch = {
@@ -153,8 +155,7 @@ function OrgMembers({ org }: { org: OrgProfile }) {
       <h2 className="text-lg font-semibold">Members</h2>
       <ul className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         {org.members.map((m) => {
-          const label =
-            m.user.displayUsername ?? m.user.name ?? m.user.username ?? "Member"
+          const label = authorName(m.user, "Member")
           const cardContent = (
             <>
               <UserAvatar src={m.user.image} fallback={label} size={7} />
@@ -203,15 +204,9 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 function OrgNotFound() {
   return (
-    <div className="relative flex min-h-screen flex-col">
-      <Header />
-      <main className="wrap flex flex-1 flex-col items-center justify-center gap-3 py-12">
-        <h1 className="text-2xl font-semibold">Organization not found</h1>
-        <p className="text-muted-foreground">
-          This organization may not exist or has been deleted.
-        </p>
-      </main>
-      <Footer />
-    </div>
+    <RouteNotFound
+      title="Organization not found"
+      message="This organization may not exist or has been deleted."
+    />
   )
 }

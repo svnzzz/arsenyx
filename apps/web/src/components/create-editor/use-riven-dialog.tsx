@@ -64,6 +64,9 @@ export function useRivenDialog({
       rivenStats: values.rivenStats,
     }
     slots.placeAt(rivenEdit.slotId, mod, base.fusionLimit)
+    // placeAt doesn't move the cursor; advance past the placed riven so the
+    // next mod click lands in an empty slot instead of overwriting it.
+    slots.selectNextEmpty(rivenEdit.slotId)
     setRivenEdit(null)
   }
 
@@ -87,10 +90,12 @@ export function findFreeNormalSlot(
   slots: BuildSlotsState,
   normalSlotCount: number,
 ): SlotId | null {
+  // Only reuse the active selection if it's a normal mod slot — rivens never
+  // go in aura/exilus/stance. (Was comparing against "aura", which isn't a
+  // SlotId: aura slots are `aura-N`, so that guard never fired.)
   if (
     slots.selected &&
-    slots.selected !== "aura" &&
-    slots.selected !== "exilus" &&
+    slots.selected.startsWith("normal-") &&
     !slots.placed[slots.selected]
   ) {
     return slots.selected
