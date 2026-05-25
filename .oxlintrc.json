@@ -22,11 +22,10 @@
     "no-underscore-dangle": "off"
   },
   "ignorePatterns": [
-    ".next/",
-    "out/",
     "build/",
     "node_modules/",
     "src/generated/",
-    "src/components/ui/"
+    "src/components/ui/",
+    "**/*.gen.ts"
   ]
 }
