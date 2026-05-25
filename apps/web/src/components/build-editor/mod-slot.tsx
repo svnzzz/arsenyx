@@ -24,8 +24,7 @@ import {
   useStartDrag,
 } from "./drag-controller"
 import { ModCard } from "./mod-card"
-import { PolarityIcon } from "./polarity-icon"
-import { PolarityPicker } from "./polarity-picker"
+import { PolarityIcon, PolarityPicker } from "./polarity"
 import type { SlotId } from "./use-build-slots"
 import { useRankHotkey } from "./use-rank-hotkey"
 
