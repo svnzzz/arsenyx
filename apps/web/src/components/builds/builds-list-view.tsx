@@ -29,13 +29,13 @@ import {
 } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
+import { useBuildLayout } from "@/lib/hooks/use-build-layout"
 import {
   LIST_PAGE_SIZE,
   publicBuildsQuery,
   type BuildListSort,
-} from "@/lib/builds-list-query"
-import { useBuildLayout } from "@/lib/use-build-layout"
-import { cn } from "@/lib/utils"
+} from "@/lib/queries/builds-list-query"
+import { cn } from "@/lib/util/utils"
 import { isValidCategory, type BrowseCategory } from "@/lib/warframe"
 
 import { SORT_VALUES } from "./builds-sort-dropdown"
