@@ -1,5 +1,18 @@
 export { ArcaneCard, ArcaneSlot } from "./arcane"
+export {
+  getBuildLayout,
+  useBuildDerived,
+  type BuildDerived,
+  type BuildLayout,
+} from "./build-derived"
+export { BuildSurface, type BuildSurfaceProps } from "./build-surface"
 export { DragController } from "./drag-controller"
+export {
+  EditorShell,
+  resetEditorCache,
+  type EditorShellSearch,
+} from "./editor-shell"
+export { EditorVariantBar } from "./editor-variant-bar"
 export {
   useArcaneSlots,
   type ArcaneSlotsState,
@@ -7,7 +20,11 @@ export {
 } from "./use-arcane-slots"
 export { GuideEditor, type GuideScope } from "./guide-editor"
 export { KeyboardHintBanner, KeyboardHintsStrip } from "./keyboard-hints"
-export { ItemSidebar, ItemSidebarPopover } from "./item-sidebar"
+export {
+  ItemSidebar,
+  ItemSidebarPopover,
+  type ItemSidebarProps,
+} from "./item-sidebar"
 export {
   calculateCapacity,
   calculateFormaCount,
