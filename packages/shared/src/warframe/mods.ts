@@ -108,6 +108,12 @@ function isPrimaryMod(compatName: string, modType: string, subtype: string) {
 }
 
 function isPistolMod(compatName: string, modType: string) {
+  // Tome mods (Grimoire/Noctua) carry `type: "Secondary Mod"` so they'd
+  // otherwise leak into every secondary's pool. The pistol/throwing and
+  // exalted-weapon branches in getModsForItem already short-circuit on
+  // `compatName === "tome"` before reaching here, so this guard is
+  // defense-in-depth — keep it so isPistolMod stays correct in isolation.
+  if (compatName === "tome") return false
   return (
     compatName === "pistol" ||
     modType.includes("secondary") ||
@@ -150,6 +156,7 @@ function modMatchesCompat(mod: Mod, compatibility: ModCompatibility): boolean {
     case "Shotgun":
       return compatName === "shotgun" || modType.includes("shotgun")
     case "Pistol":
+      if (compatName === "tome") return false
       return compatName === "pistol" || modType.includes("secondary")
     case "Melee":
       return isMeleeCompat(compatName, modType)
@@ -253,6 +260,16 @@ function isNecramechExalted(uniqueName?: string): boolean {
   return uniqueName.includes("NechroTech") || uniqueName.includes("EntratiMech")
 }
 
+// Tome weapons (Grimoire, Noctua) accept Tome mods — `compatName: "Tome"`,
+// `type: "Secondary Mod"` — in addition to the standard secondary pool. Tome
+// mods are exclusive to these two weapons, so every other secondary must
+// exclude them (see isPistolMod / modMatchesCompat). Match on name prefix so a
+// future variant (e.g. a Grimoire Prime) is covered automatically.
+function isTomeWeapon(name?: string): boolean {
+  const lower = name?.toLowerCase() ?? ""
+  return lower.startsWith("grimoire") || lower.startsWith("noctua")
+}
+
 export function getModsForItem(
   item: {
     type?: string
@@ -289,7 +306,11 @@ export function getModsForItem(
     const category = item.category?.toLowerCase()
     const compats = category ? CATEGORY_TO_COMPAT[category] : undefined
     if (!compats) return []
-    return mods.filter((m) => compats.some((c) => modMatchesCompat(m, c)))
+    const isTome = isTomeWeapon(itemName)
+    return mods.filter((m) => {
+      if ((m.compatName?.toLowerCase() ?? "") === "tome") return isTome
+      return compats.some((c) => modMatchesCompat(m, c))
+    })
   }
 
   const itemTypeLower = itemType.toLowerCase()
@@ -314,6 +335,8 @@ export function getModsForItem(
     }
 
     if (itemTypeLower === "pistol" || itemTypeLower === "throwing") {
+      // Grimoire accepts Tome mods in addition to the standard secondary pool.
+      if (compatName === "tome") return isTomeWeapon(itemName)
       if (
         modType.includes("secondary") &&
         compatName &&
@@ -386,6 +409,10 @@ export function getModsForItem(
           return compatName === "archgun" || modType.includes("arch-gun")
         return compatName === "archmelee" || modType.includes("arch-melee")
       }
+      // Noctua (Dante's exalted) is a Tome weapon, so it takes Tome mods on top
+      // of the standard secondary pool — same as the Grimoire. It has a trigger
+      // and would otherwise fall to isPistolMod, which excludes Tome mods.
+      if (compatName === "tome") return isTomeWeapon(itemName)
       if (itemNameLower.includes("bow"))
         return isPrimaryMod(compatName, modType, "bow")
       if (item.trigger) return isPistolMod(compatName, modType)
