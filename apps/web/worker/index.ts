@@ -26,7 +26,12 @@ type BuildSummary = {
   description: string | null
   visibility: "PUBLIC" | "PRIVATE" | "UNLISTED"
   hideAuthor: boolean
-  item: { name: string; category: string; imageName: string | null }
+  item: {
+    name: string
+    category: string
+    uniqueName: string
+    imageName: string | null
+  }
   user: {
     displayUsername: string | null
     username: string | null
@@ -67,9 +72,34 @@ export default {
     const contentType = shellRes.headers.get("content-type") ?? ""
     if (!shellRes.ok || !contentType.includes("text/html")) return shellRes
 
+    // Builds persist a denormalized item imageName that rots across
+    // image-scheme changes (see scripts/sync-images.ts). Re-resolve the OG
+    // image by the item's stable uniqueName against the same image-map.json the
+    // SPA uses, falling back to the stored value on a miss.
+    const imageMap = await fetchImageMap(env, url)
     const canonical = new URL(`/builds/${slug}`, url).toString()
-    return rewriteMeta(shellRes, buildMeta(build, canonical))
+    return rewriteMeta(shellRes, buildMeta(build, canonical, imageMap))
   },
+}
+
+// Compact `uniqueName → current imageName` map emitted by
+// scripts/build-items-index.ts and served from Static Assets. Fetched through
+// the ASSETS binding (same colo, no external hop) only on the unfurl path.
+async function fetchImageMap(
+  env: Env,
+  base: URL,
+): Promise<Record<string, string> | null> {
+  try {
+    // The ASSETS binding is an in-isolate service binding; it never consults
+    // Cloudflare's edge cache, so `cf: { cacheTtl, ... }` would be silently
+    // ignored here (those directives only apply to global `fetch()`).
+    const req = new Request(new URL("/data/image-map.json", base).toString())
+    const res = await env.ASSETS.fetch(req)
+    if (!res.ok) return null
+    return (await res.json()) as Record<string, string>
+  } catch {
+    return null
+  }
 }
 
 function extractSlug(pathname: string): string | null {
@@ -115,7 +145,11 @@ type Meta = {
   url: string
 }
 
-function buildMeta(b: BuildSummary, url: string): Meta {
+function buildMeta(
+  b: BuildSummary,
+  url: string,
+  imageMap: Record<string, string> | null,
+): Meta {
   // `hideAuthor` means "this is an org build — don't reveal the underlying
   // user, just show the org". Falling back to null when hideAuthor=true
   // would drop the org credit entirely, which is the opposite of intent.
@@ -140,7 +174,10 @@ function buildMeta(b: BuildSummary, url: string): Meta {
     ? clamp(`${summary} · ${stats}`, 280)
     : `${b.item.name} (${category}) build on Arsenyx · ${stats}`
 
-  return { title, description, image: imageUrl(b.item.imageName), url }
+  const resolvedImage =
+    (imageMap && b.item.uniqueName ? imageMap[b.item.uniqueName] : null) ??
+    b.item.imageName
+  return { title, description, image: imageUrl(resolvedImage), url }
 }
 
 // Collapse all whitespace (including embedded newlines / tabs) to single
@@ -153,14 +190,15 @@ function collapseWs(s: string): string {
 
 function imageUrl(imageName: string | null): string | null {
   if (!imageName) return null
-  // If a future data refresh ever stores an absolute URL, honour it. Otherwise
-  // treat the value as a bare filename and join it under cdn.warframestat.us
-  // — leading slashes are stripped because URL() would otherwise resolve them
-  // against the host root and drop the `/img/` base path.
+  // Newer catalog data ships absolute `https://img.arsenyx.com/...` URLs
+  // (see scripts/sync-images.ts). Pass those through unchanged. Legacy
+  // saved builds may still carry a bare filename — fall back to our own
+  // CDN root so the OG card resolves to something hosted by us instead
+  // of the upstream CDN we no longer use.
   if (/^https?:\/\//i.test(imageName)) return imageName
   const clean = imageName.replace(/^\/+/, "")
   try {
-    return new URL(clean, "https://cdn.warframestat.us/img/").toString()
+    return new URL(clean, "https://img.arsenyx.com/").toString()
   } catch {
     return null
   }

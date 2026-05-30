@@ -12,6 +12,12 @@ import {
   getIncarnonGenesisImage,
   isInnateIncarnon,
 } from "@arsenyx/shared/warframe/incarnon-data"
+import {
+  defaultKitgunComponents,
+  isKitgunChamber,
+  type KitgunComponents,
+  kitgunGripsFor,
+} from "@arsenyx/shared/warframe/kitgun-data"
 import { isRivenMod } from "@arsenyx/shared/warframe/rivens"
 import {
   DEFAULT_DEPLOYMENT_CONTEXT,
@@ -44,6 +50,7 @@ import {
   normalizeBuildData,
   savedDataToBuildState,
   selectVariant,
+  stripPersistedImages,
   SYNTHETIC_VARIANT_ID,
   SYNTHETIC_VARIANT_LABEL,
 } from "@/lib/codec/build-codec-adapter"
@@ -99,6 +106,7 @@ type SharedEditorOverrides = {
   hasReactor?: boolean
   shards?: (PlacedShard | null)[]
   zawComponents?: { grip: string; link: string } | undefined
+  kitgunComponents?: KitgunComponents | undefined
   lichBonusElement?: LichBonusElement | null
   formaPolarities?: Partial<Record<string, Polarity>>
   buildName?: string
@@ -424,6 +432,36 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
     })
   }, [item.name])
 
+  // Kitgun chambers surface as primary/secondary items; the grip's class is
+  // fixed by which one the build is anchored to (mirrors the zaw block above).
+  const kitgunClass = category === "primary" ? "primary" : "secondary"
+  const [kitgunComponents, setKitgunComponents] = useState<
+    KitgunComponents | undefined
+  >(() => {
+    if (cachedShared && "kitgunComponents" in cachedShared) {
+      return cachedShared.kitgunComponents
+    }
+    if (savedData.kitgunComponents) return savedData.kitgunComponents
+    if (isKitgunChamber(item.uniqueName)) {
+      return defaultKitgunComponents(kitgunClass)
+    }
+    return undefined
+  })
+
+  useEffect(() => {
+    setKitgunComponents((prev) => {
+      if (!isKitgunChamber(item.uniqueName)) return undefined
+      // Re-seed when there's no prior selection, or when the prior grip no
+      // longer fits this chamber's class. Primary/secondary variants of one
+      // chamber share a uniqueName and `create.tsx` doesn't re-key EditorShell
+      // on the swap, so a stale primary grip (e.g. Brash) could otherwise
+      // linger on a secondary chamber. Loaders are class-agnostic.
+      const gripFits =
+        prev && kitgunGripsFor(kitgunClass).some((g) => g.name === prev.grip)
+      return gripFits ? prev : defaultKitgunComponents(kitgunClass)
+    })
+  }, [item.uniqueName, kitgunClass])
+
   const [lichBonusElement, setLichBonusElement] =
     useState<LichBonusElement | null>(
       () =>
@@ -454,6 +492,7 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
       hasReactor,
       shards,
       zawComponents,
+      kitgunComponents,
       lichBonusElement,
       buildName,
       guideSummary,
@@ -467,6 +506,7 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
     hasReactor,
     shards,
     zawComponents,
+    kitgunComponents,
     lichBonusElement,
     buildName,
     guideSummary,
@@ -625,6 +665,7 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
       shards,
       helminth,
       zawComponents,
+      kitgunComponents,
       lichBonusElement: lichBonusElement ?? undefined,
       incarnonEnabled,
       incarnonPerks,
@@ -652,6 +693,7 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
         shardSlots: state.shardSlots,
         helminthAbility: state.helminthAbility,
         zawComponents: state.zawComponents,
+        kitgunComponents: state.kitgunComponents,
         lichBonusElement: state.lichBonusElement,
         buildName: state.buildName,
         variants: allVariants.map((sv) => {
@@ -677,6 +719,7 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
             shards,
             helminth,
             zawComponents,
+            kitgunComponents,
             lichBonusElement: lichBonusElement ?? undefined,
             incarnonEnabled: sv.incarnonEnabled ?? incarnonEnabled,
             incarnonPerks: sv.incarnonPerks ?? incarnonPerks,
@@ -746,7 +789,11 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
         visibility: nextVisibility,
         organizationId: nextOrganizationId,
         hideAuthor: nextHideAuthor,
-        buildData: {
+        // Strip denormalized mod/arcane/helminth imageName before persisting —
+        // images are re-resolved by uniqueName at render time (viewer via
+        // image-map.json, editor via the catalog), so storing them just bloats
+        // the row and rots across image-scheme changes.
+        buildData: stripPersistedImages({
           version: 1,
           slots: slots.placed,
           formaPolarities: slots.formaPolarities,
@@ -755,6 +802,7 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
           hasReactor,
           helminth,
           zawComponents,
+          kitgunComponents,
           lichBonusElement: lichBonusElement ?? undefined,
           incarnonEnabled,
           incarnonPerks,
@@ -767,7 +815,7 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
             !isSyntheticVariant(nextVariants[0])) && {
             variants: nextVariants,
           }),
-        },
+        }),
         guide: {
           summary: guideSummary.trim() || null,
           description: guideDescription.trim() || null,
@@ -980,6 +1028,9 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
             category={category}
             isCompanion={isCompanion}
             normalSlotCount={normalSlotCount}
+            auraSlotCount={auraSlotCount}
+            showExilus={showExilus}
+            showStance={showStance}
             arcaneCount={arcaneCount}
             slots={slots}
             arcanes={arcanes}
@@ -1000,6 +1051,8 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
               onSetHelminth: setHelminthAt,
               zawComponents,
               onSetZawComponents: setZawComponents,
+              kitgunComponents,
+              onSetKitgunComponents: setKitgunComponents,
               lichBonusElement,
               onSetLichBonusElement: setLichBonusElement,
               incarnonEnabled,

@@ -1,7 +1,11 @@
 import type { BrowseCategory, Mod, Polarity } from "./types"
 
 export const RIVEN_UNIQUE_NAME = "/riven"
-export const RIVEN_IMAGE_NAME = "OmegaMod.png"
+// Rivens are excluded from the catalog (no per-mod image in the pipeline), so
+// this is a bundled local icon under apps/web/public/ — DE's generic riven card
+// art (`OmegaMod.png`). A local `/img/` path is what `getImageUrl` trusts; the
+// old bare `"OmegaMod.png"` resolved to nothing and rendered the `?` placeholder.
+export const RIVEN_IMAGE_NAME = "/img/items/riven-mod.png"
 
 /** Polarities a riven mod can be rolled with. */
 export const RIVEN_POLARITIES: readonly Polarity[] = [
@@ -10,7 +14,7 @@ export const RIVEN_POLARITIES: readonly Polarity[] = [
   "vazarin",
 ] as const
 
-/** Riven polarity drain reduction caps at 9 (default max cost). */
+/** Maximum base drain a riven mod can have (un-installed cost). */
 export const RIVEN_MAX_DRAIN = 18
 export const RIVEN_MIN_DRAIN = 0
 
@@ -75,21 +79,21 @@ export const RIVEN_ELIGIBLE_CATEGORIES = new Set<BrowseCategory>([
   "companion-weapons",
 ])
 
-/** Riven-eligible weapons per the wiki: Primary, Secondary, Melee,
- * Arch-Guns, and Robotic (companion) weapons. The `archwing` browse
- * category lumps Arch-Guns with Arch-Melee and Archwing suits, so we
- * inspect the raw WFCD category for that case. Beast claws share the
- * `companion-weapons` browse bucket with robotic companion weapons but
- * are not riven-eligible. */
+/** Riven-eligible weapons per the wiki (https://wiki.warframe.com/w/Riven_Mod):
+ * Primary, Secondary, Melee, Arch-Guns, and Robotic (Sentinel/MOA/Hound)
+ * weapons. Beast companion weapons (Kavat/Kubrow/Vulpaphyla/Predasite claws,
+ * displayClass "Claws (Beast)") are NOT eligible — they share the
+ * `companion-weapons` browse bucket with the robotic weapons that are. The
+ * `archwing` browse bucket lumps Arch-Guns with Arch-Melee and suits, so we
+ * gate on displayClass there too (only "Archgun" is eligible). */
 export function isRivenEligible(
   category: BrowseCategory,
-  item: { category?: string; type?: string },
+  item: { displayClass?: string },
 ): boolean {
   if (RIVEN_ELIGIBLE_CATEGORIES.has(category)) {
-    if (item.type === "Beast Weapon") return false
-    return true
+    return item.displayClass !== "Claws (Beast)"
   }
-  if (category === "archwing" && item.category === "Arch-Gun") return true
+  if (category === "archwing" && item.displayClass === "Archgun") return true
   return false
 }
 

@@ -1,3 +1,4 @@
+import { clamp } from "@arsenyx/shared"
 import type { Arcane, Mod, RivenStats } from "@arsenyx/shared/warframe/types"
 
 import type { ConditionLabel, ParsedStat, StatType } from "./types"
@@ -12,8 +13,6 @@ const PERCENT_PATTERN =
   /([+-]?\d+(?:\.\d+)?)\s*%\s+([A-Za-z][A-Za-z\s]*?)(?:\.|$|\n|,|<)/g
 const FLAT_PATTERN =
   /([+-]\d+(?:\.\d+)?)\s+(?!%|s\b|m\b|x\b)([A-Za-z][A-Za-z\s]*?)(?:\.|$|\n|,)/g
-const MULT_PATTERN =
-  /(\d+(?:\.\d+)?)\s*x\s+([A-Za-z][A-Za-z\s]*?)(?:\.|$|\n|,)/g
 
 const STAT_NAME_MAP: Record<string, StatType> = {
   health: "health",
@@ -164,7 +163,7 @@ export function parseModStats(input: PlacedModInput): ParsedStat[] {
   const results: ParsedStat[] = []
   const levels = mod.levelStats
   if (levels && levels.length > 0) {
-    const rankIndex = Math.min(Math.max(rank, 0), levels.length - 1)
+    const rankIndex = clamp(rank, 0, levels.length - 1)
     const levelData = levels[rankIndex]
     if (levelData?.stats) {
       for (const s of levelData.stats) {
@@ -193,7 +192,7 @@ export function parseArcaneStats(input: PlacedArcaneInput): ParsedStat[] {
   const out: ParsedStat[] = []
   const levels = arcane.levelStats
   if (levels && levels.length > 0) {
-    const rankIndex = Math.min(Math.max(rank, 0), levels.length - 1)
+    const rankIndex = clamp(rank, 0, levels.length - 1)
     const levelData = levels[rankIndex]
     if (levelData?.stats) {
       for (const s of levelData.stats) {
@@ -221,7 +220,7 @@ export function parseRivenStats(rivenStats: RivenStats): ParsedStat[] {
   return out
 }
 
-/** Parse a single stat string from WFCD data. */
+/** Parse a single stat string from the item data. */
 export function parseStatString(statString: string): ParsedStat[] {
   const results: ParsedStat[] = []
 
@@ -232,10 +231,32 @@ export function parseStatString(statString: string): ParsedStat[] {
 
   const cond = detectCondition(statString)
 
+  // Trade-off auras (Power Donation, Combat Discipline, Melee Guidance) pack
+  // two clauses on separate lines: a wearer penalty ("You lose X") and a
+  // squad buff ("Squadmates gain X"). Parse line-by-line so each clause is
+  // judged on its own: the squadmates buff doesn't touch the equipped frame,
+  // and the wearer's loss subtracts despite the number being written positive.
+  for (const clause of statString.split(/\r?\n/)) {
+    const clauseLower = clause.toLowerCase()
+    if (clauseLower.includes("squadmates")) continue
+    const sign = clauseLower.includes("you lose") ? -1 : 1
+    parseClauseInto(clause, sign, cond, results)
+  }
+
+  return results
+}
+
+/** Extract stats from one clause, applying `sign` (−1 negates "You lose X"). */
+function parseClauseInto(
+  clause: string,
+  sign: number,
+  cond: ConditionInfo,
+  results: ParsedStat[],
+): void {
   let match: RegExpMatchArray
 
-  for (match of statString.matchAll(COLOR_TAG_PATTERN)) {
-    const value = parseFloat(match[1])
+  for (match of clause.matchAll(COLOR_TAG_PATTERN)) {
+    const value = parseFloat(match[1]) * sign
     const colorTag = match[2]
     const damageType = DAMAGE_TYPE_COLORS[colorTag]
     if (damageType) {
@@ -249,8 +270,8 @@ export function parseStatString(statString: string): ParsedStat[] {
     }
   }
 
-  for (match of statString.matchAll(PERCENT_PATTERN)) {
-    const value = parseFloat(match[1])
+  for (match of clause.matchAll(PERCENT_PATTERN)) {
+    const value = parseFloat(match[1]) * sign
     const statName = match[2].trim().toLowerCase()
     if (DAMAGE_TYPE_COLORS[`DT_${statName.toUpperCase()}_COLOR`]) continue
     const statType = STAT_NAME_MAP[statName]
@@ -259,8 +280,8 @@ export function parseStatString(statString: string): ParsedStat[] {
     }
   }
 
-  for (match of statString.matchAll(FLAT_PATTERN)) {
-    const value = parseFloat(match[1])
+  for (match of clause.matchAll(FLAT_PATTERN)) {
+    const value = parseFloat(match[1]) * sign
     const statName = match[2].trim().toLowerCase()
     if (
       ["damage", "enemies", "seconds", "meters", "radius"].some((s) =>
@@ -276,22 +297,6 @@ export function parseStatString(statString: string): ParsedStat[] {
       }
     }
   }
-
-  for (match of statString.matchAll(MULT_PATTERN)) {
-    const value = parseFloat(match[1])
-    const statName = match[2].trim().toLowerCase()
-    const statType = STAT_NAME_MAP[statName]
-    if (statType) {
-      results.push({
-        type: statType,
-        value,
-        operation: "percent_mult",
-        ...cond,
-      })
-    }
-  }
-
-  return results
 }
 
 export interface SourcedStat extends ParsedStat {

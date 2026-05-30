@@ -1,3 +1,4 @@
+import { clamp } from "../util/math"
 import type { BuildDoc, BuildVariant } from "./build-doc"
 import { projectVariant } from "./build-doc"
 import { normalizePolarity } from "./mods"
@@ -102,6 +103,7 @@ interface EncodedSharedMeta {
   sh?: number[]
   h?: EncodedHelminth
   zc?: { g: string; l: string }
+  kc?: { g: string; l: string }
   lb?: string
   n?: string
 }
@@ -184,7 +186,7 @@ function decodeSlot(
       // non-rivens at decode time (we don't have the mod's data here), so it
       // can't gate the rank — a crafted link must not be able to inject an
       // arbitrary rank into capacity / endo math downstream.
-      rank: Math.max(0, Math.min(10, Math.floor(encoded.m.r ?? 0))),
+      rank: clamp(Math.floor(encoded.m.r ?? 0), 0, 10),
       rarity: isRiven ? "Riven" : "",
     }
     if (encoded.m.rv) {
@@ -297,6 +299,7 @@ type SharedMetaSource = Pick<
   | "shardSlots"
   | "helminthAbility"
   | "zawComponents"
+  | "kitgunComponents"
   | "lichBonusElement"
   | "buildName"
 >
@@ -323,6 +326,8 @@ function encodeSharedMeta(
   }
   if (src.zawComponents)
     target.zc = { g: src.zawComponents.grip, l: src.zawComponents.link }
+  if (src.kitgunComponents)
+    target.kc = { g: src.kitgunComponents.grip, l: src.kitgunComponents.loader }
   if (src.lichBonusElement) target.lb = src.lichBonusElement
   if (src.buildName) target.n = src.buildName
 }
@@ -346,6 +351,9 @@ function decodeSharedMeta(encoded: EncodedSharedMeta): SharedMetaSource & {
       : undefined,
     zawComponents: encoded.zc
       ? { grip: encoded.zc.g, link: encoded.zc.l }
+      : undefined,
+    kitgunComponents: encoded.kc
+      ? { grip: encoded.kc.g, loader: encoded.kc.l }
       : undefined,
     lichBonusElement: parseLichBonusElement(encoded.lb),
     buildName: encoded.n,
@@ -493,6 +501,7 @@ function buildStateToBuildDoc(state: Partial<BuildState>): BuildDoc {
     shardSlots: state.shardSlots ?? [],
     helminthAbility: state.helminthAbility,
     zawComponents: state.zawComponents,
+    kitgunComponents: state.kitgunComponents,
     lichBonusElement: state.lichBonusElement,
     buildName: state.buildName,
     variants: [
@@ -509,39 +518,5 @@ function buildStateToBuildDoc(state: Partial<BuildState>): BuildDoc {
         deploymentContext: state.deploymentContext,
       },
     ],
-  }
-}
-
-// =============================================================================
-// URL helpers
-// =============================================================================
-
-export function generateBuildUrl(state: BuildState, baseUrl?: string): string {
-  const encoded = encodeBuild(state)
-  const base =
-    baseUrl || (typeof window !== "undefined" ? window.location.origin : "")
-  return `${base}/create?build=${encodeURIComponent(encoded)}`
-}
-
-export function extractBuildFromUrl(url: string): Partial<BuildState> | null {
-  try {
-    const urlObj = new URL(url)
-    const buildParam = urlObj.searchParams.get("build")
-    if (!buildParam) return null
-    return decodeBuild(decodeURIComponent(buildParam))
-  } catch {
-    return null
-  }
-}
-
-export async function copyBuildToClipboard(
-  state: BuildState,
-): Promise<boolean> {
-  try {
-    const url = generateBuildUrl(state)
-    await navigator.clipboard.writeText(url)
-    return true
-  } catch {
-    return false
   }
 }

@@ -3,8 +3,6 @@ export const SITE_CONFIG = {
   name: "ARSENYX",
   description:
     "Open-source Warframe build planner. Fast, keyboard-first, and community-driven.",
-  tagline: "Build. Share. Dominate.",
-  github: "https://github.com/Reuzehagel/arsenyx",
   author: "Arsenyx",
   year: new Date().getFullYear(),
 } as const
@@ -16,7 +14,6 @@ export const ROUTES = {
   builds: "/builds",
   create: "/create",
   import: "/import",
-  modsTest: "/mods-test",
   orgs: "/orgs",
   docs: "/docs",
   changelog: "/changelog",
@@ -40,7 +37,7 @@ export const API_URL =
 // External links
 export const EXTERNAL_LINKS = {
   github: "https://github.com/Reuzehagel/arsenyx",
-  wfcd: "https://warframestat.us",
+  wiki: "https://wiki.warframe.com",
   apiBase: "https://api.arsenyx.com",
 } as const
 

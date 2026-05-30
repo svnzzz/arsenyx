@@ -1,5 +1,4 @@
 // Warframe item types for browseable equipment
-// Based on @wfcd/items type definitions
 
 export type BrowseCategory =
   | "warframes"
@@ -12,17 +11,6 @@ export type BrowseCategory =
   | "exalted-weapons"
   | "archwing"
   | "railjack"
-
-export type WfcdCategory =
-  | "Warframes"
-  | "Primary"
-  | "Secondary"
-  | "Melee"
-  | "Sentinels"
-  | "Pets"
-  | "Archwing"
-  | "Arch-Gun"
-  | "Arch-Melee"
 
 // Base item interface with common fields
 export interface BaseItem {
@@ -129,7 +117,7 @@ export interface Melee extends Weapon {
   /**
    * Canonical stance compat-name for this melee (e.g. "Polearms"). Matches
    * stance mod `compatName` so the picker can filter stances per weapon.
-   * Currently absent from WFCD upstream — when populated, `getModsForItem`
+   * Currently absent from upstream data — when populated, `getModsForItem`
    * filters stance mods; while missing, the picker shows every stance mod.
    */
   meleeClass?: string
@@ -178,7 +166,9 @@ export interface BrowseItem {
   masteryReq?: number
   isPrime?: boolean
   vaulted?: boolean
-  type?: string
+  /** Wiki Class label ("Sniper Rifle", "Polearm", "Warframe"). This is what
+   *  appears as the class label in the UI, not a category enum. */
+  displayClass?: string
   releaseDate?: string // Format: "YYYY-MM-DD"
 }
 
@@ -232,12 +222,23 @@ export interface Mod {
   baseDrain: number
   fusionLimit: number
   compatName?: string // e.g., "Warframe", "Rifle", "Shotgun", "Pistol", "Melee"
+  /** Augment routing: closed list of catalog item `uniqueName` values
+   *  this mod fits. Set by `build-items-index.ts` from OpenWF's `compat`
+   *  field after expanding BaseSuit anchors to their family of frames
+   *  (Excalibur / ExcaliburPrime / ExcaliburUmbra share one entry).
+   *  Absent on non-augment mods — runtime treats missing as "no
+   *  restriction". See `getModsForItem`. */
+  compatItems?: string[]
   type: string // e.g., "Warframe Mod", "Primary Mod", "Secondary Mod", "Melee Mod"
   tradable: boolean
   isAugment?: boolean
   isPrime?: boolean
   isExilus?: boolean
-  isUtility?: boolean // Also indicates exilus-compatible mods in WFCD data
+  isUtility?: boolean // Also indicates exilus-compatible mods in the source data
+  /** True for PvP-only mods (description mentions Conclave). The mod-picker
+   *  filters these by default — see the Game Mode toggle in
+   *  `mod-search-grid.tsx`. */
+  isConclave?: boolean
   levelStats?: Array<{ stats: string[] }>
   modSet?: string
   modSetStats?: string[]
@@ -262,7 +263,13 @@ export interface Arcane {
   name: string
   description?: string
   imageName?: string
+  /** Effect bucket from DE's sub-path: "Offensive" | "Defensive" | "Utility"
+   *  | "Zariman" | "Amp" | "Operator". NOT an equip slot. */
   type: string
+  /** Equip slot from the wiki's `Type` field: "Warframe" | "Primary" |
+   *  "Secondary" | "Melee" | "Bow" | "Shotgun" | "Kitgun" | "Zaw" | "Amp" |
+   *  "Operator" | "Tektolyst Artifacts". Drives slot eligibility. */
+  slotType?: string
   tradable: boolean
   levelStats?: Array<{ stats: string[] }>
   drops?: Array<{
@@ -312,7 +319,7 @@ export interface PlacedMod {
   modSet?: string
   modSetStats?: string[]
   isExilus?: boolean
-  isUtility?: boolean // Also indicates exilus-compatible mods in WFCD data
+  isUtility?: boolean // Also indicates exilus-compatible mods in the source data
   rivenStats?: RivenStats
 }
 
@@ -369,6 +376,13 @@ export interface BuildState {
     link: string
   }
 
+  // Kitgun component selection (Kitgun primary/secondary only).
+  // Chamber is derived from the build's item — it's not stored here.
+  kitgunComponents?: {
+    grip: string
+    loader: string
+  }
+
   // Bonus element on Kuva/Tenet/Coda weapons (maxLevelCap: 40).
   lichBonusElement?: LichBonusElement
 
@@ -406,22 +420,6 @@ export interface HelminthAbility {
   source: string // "Helminth" or source Warframe name
   description?: string
 }
-
-// Mod compatibility categories for filtering
-export type ModCompatibility =
-  | "Warframe"
-  | "Aura"
-  | "Exilus"
-  | "Rifle"
-  | "Shotgun"
-  | "Pistol"
-  | "Melee"
-  | "Companion"
-  | "Archwing"
-  | "Archgun"
-  | "Archmelee"
-  | "Necramech"
-  | "Plexus"
 
 // =============================================================================
 // ARCHON SHARD TYPES

@@ -2,13 +2,14 @@ import {
   SHARD_COLORS,
   SHARD_STATS,
   getStatIndex,
-  getStatByIndex,
   type ShardColor,
   type ShardStat,
   type PlacedShard,
 } from "@arsenyx/shared/warframe"
 
-export { SHARD_COLORS, SHARD_STATS, getStatIndex, getStatByIndex }
+import { formatStat } from "./warframe"
+
+export { SHARD_COLORS, SHARD_STATS, getStatIndex }
 export type { ShardColor, ShardStat, PlacedShard }
 
 export const SHARD_COLOR_NAMES: Record<ShardColor, string> = {
@@ -88,38 +89,5 @@ export function findShardStat(
 
 export function formatStatValue(stat: ShardStat, tauforged: boolean): string {
   const v = tauforged ? stat.tauforgedValue : stat.baseValue
-  const f = Number.isInteger(v)
-    ? v.toString()
-    : v.toFixed(1).replace(/\.0$/, "")
-  return `+${f}${stat.unit}`
-}
-
-/** Stat-name → warframe base-stat key, for flat bonuses (unit === ""). */
-const AZURE_MAP: Record<string, "health" | "shield" | "armor" | "energy"> = {
-  Health: "health",
-  "Shield Capacity": "shield",
-  Armor: "armor",
-  "Energy Max": "energy",
-}
-
-export interface ShardStatBonuses {
-  health: number
-  shield: number
-  armor: number
-  energy: number
-}
-
-export function sumShardFlatBonuses(
-  shards: (PlacedShard | null)[],
-): ShardStatBonuses {
-  const out: ShardStatBonuses = { health: 0, shield: 0, armor: 0, energy: 0 }
-  for (const s of shards) {
-    if (!s) continue
-    const key = AZURE_MAP[s.stat]
-    if (!key) continue
-    const stat = findShardStat(s.color, s.stat)
-    if (!stat || stat.unit !== "") continue
-    out[key] += s.tauforged ? stat.tauforgedValue : stat.baseValue
-  }
-  return out
+  return `+${formatStat(v, 1)}${stat.unit}`
 }

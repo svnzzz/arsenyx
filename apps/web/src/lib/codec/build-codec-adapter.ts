@@ -28,6 +28,7 @@ type EditorState = {
   shards: (PlacedShard | null)[]
   helminth: Record<number, HelminthAbility>
   zawComponents?: { grip: string; link: string }
+  kitgunComponents?: { grip: string; loader: string }
   lichBonusElement?: LichBonusElement
   incarnonEnabled?: boolean
   incarnonPerks?: (string | null)[]
@@ -68,7 +69,7 @@ function toEditorPlacedMod(
 ): PlacedMod | null {
   // Rivens come with a stub uniqueName and rivenStats attached; preserve as-is.
   // Older saved builds carry the legacy hashed riven imageName (e.g.
-  // rifle-riven-mod-e05c5519f1.png) that wfcd no longer hosts — pin to the
+  // rifle-riven-mod-e05c5519f1.png) that the upstream CDN no longer hosts — pin to the
   // current RIVEN_IMAGE_NAME so they self-heal on next render.
   if (shared.rivenStats) {
     const mod: Mod = {
@@ -181,6 +182,7 @@ export function savedDataToBuildState(state: EditorState): BuildState {
     buildName: state.buildName,
     helminthAbility,
     zawComponents: state.zawComponents,
+    kitgunComponents: state.kitgunComponents,
     lichBonusElement: state.lichBonusElement,
     incarnonEnabled: state.incarnonEnabled,
     incarnonPerks: state.incarnonPerks,
@@ -245,12 +247,150 @@ export function buildStateToSavedData(
       hasReactor: state.hasReactor ?? true,
       helminth,
       zawComponents: state.zawComponents,
+      kitgunComponents: state.kitgunComponents,
       lichBonusElement: state.lichBonusElement,
       incarnonEnabled: state.incarnonEnabled,
       incarnonPerks: state.incarnonPerks,
       deploymentContext: state.deploymentContext,
     },
     buildName: state.buildName,
+  }
+}
+
+/**
+ * Re-resolve every placed mod/arcane/helminth `imageName` from the current
+ * catalog by its stable `uniqueName`. New-format builds carry full mod objects
+ * inline (so the viewer skips the ~1.2 MB mod catalog), but those inline
+ * `imageName`s were frozen at save time and rot across image-scheme changes.
+ * Patching against the compact `image-map.json` self-heals them without the
+ * full catalog. Legacy builds already get fresh images via `toEditorPlacedMod`,
+ * so this is a no-op for them. Falls back to the stored value on a map miss.
+ */
+export function refreshImagesFromMap(
+  data: SavedBuildData,
+  imageMap: Record<string, string> | undefined,
+): SavedBuildData {
+  if (!imageMap || Object.keys(imageMap).length === 0) return data
+  const url = (uniqueName?: string): string | undefined =>
+    uniqueName ? imageMap[uniqueName] : undefined
+
+  const fixSlots = (
+    slots: Partial<Record<SlotId, PlacedMod>> | undefined,
+  ): Partial<Record<SlotId, PlacedMod>> | undefined => {
+    if (!slots) return slots
+    const next: Partial<Record<SlotId, PlacedMod>> = {}
+    for (const [id, placed] of Object.entries(slots)) {
+      if (!placed) continue
+      // Rivens have a stub uniqueName that isn't in the catalog/map, so pin
+      // them to the current RIVEN_IMAGE_NAME — this heals older builds that
+      // stored a now-dead riven image (e.g. the bare "OmegaMod.png").
+      if (placed.mod.rivenStats) {
+        next[id as SlotId] = {
+          ...placed,
+          mod: { ...placed.mod, imageName: RIVEN_IMAGE_NAME },
+        }
+        continue
+      }
+      const fresh = url(placed.mod.uniqueName)
+      next[id as SlotId] = fresh
+        ? { ...placed, mod: { ...placed.mod, imageName: fresh } }
+        : placed
+    }
+    return next
+  }
+  const fixArcanes = (
+    arcanes: (PlacedArcane | null)[] | undefined,
+  ): (PlacedArcane | null)[] | undefined =>
+    arcanes?.map((a) => {
+      if (!a) return a
+      const fresh = url(a.arcane.uniqueName)
+      return fresh ? { ...a, arcane: { ...a.arcane, imageName: fresh } } : a
+    })
+  const fixHelminth = (
+    helminth: Record<number, HelminthAbility> | undefined,
+  ): Record<number, HelminthAbility> | undefined => {
+    if (!helminth) return helminth
+    const next: Record<number, HelminthAbility> = {}
+    for (const [slot, ability] of Object.entries(helminth)) {
+      const fresh = url(ability.uniqueName)
+      next[Number(slot)] = fresh ? { ...ability, imageName: fresh } : ability
+    }
+    return next
+  }
+
+  return {
+    ...data,
+    slots: fixSlots(data.slots),
+    arcanes: fixArcanes(data.arcanes),
+    helminth: fixHelminth(data.helminth),
+    variants: data.variants?.map((v) => ({
+      ...v,
+      slots: fixSlots(v.slots) ?? v.slots,
+      arcanes: fixArcanes(v.arcanes) ?? v.arcanes,
+      helminth: fixHelminth(v.helminth),
+    })),
+  }
+}
+
+/**
+ * Drop the denormalized `imageName` from every placed mod/arcane/helminth
+ * before a build is persisted. Images are re-resolved at render time by stable
+ * `uniqueName` — the viewer via `image-map.json` (refreshImagesFromMap), the
+ * editor via the full catalog (normalizeBuildData) — so the stored copy is dead
+ * weight that also rots whenever the image-naming/hosting scheme changes.
+ * `name` and stats stay for snapshot fidelity (vaulted entities still render).
+ *
+ * Rivens are the one exception: they carry a stub `uniqueName` that isn't in the
+ * catalog/map, so there's nothing to re-resolve from — but their image is the
+ * stable `RIVEN_IMAGE_NAME` constant that never rots, so we keep it as-is.
+ */
+export function stripPersistedImages(data: SavedBuildData): SavedBuildData {
+  const stripMod = (placed: PlacedMod): PlacedMod => {
+    if (placed.mod.rivenStats) return placed
+    const { imageName: _drop, ...mod } = placed.mod
+    return { ...placed, mod }
+  }
+  const stripSlots = (
+    slots: Partial<Record<SlotId, PlacedMod>> | undefined,
+  ): Partial<Record<SlotId, PlacedMod>> | undefined => {
+    if (!slots) return slots
+    const next: Partial<Record<SlotId, PlacedMod>> = {}
+    for (const [id, placed] of Object.entries(slots)) {
+      if (placed) next[id as SlotId] = stripMod(placed)
+    }
+    return next
+  }
+  const stripArcanes = (
+    arcanes: (PlacedArcane | null)[] | undefined,
+  ): (PlacedArcane | null)[] | undefined =>
+    arcanes?.map((a) => {
+      if (!a) return a
+      const { imageName: _drop, ...arcane } = a.arcane
+      return { ...a, arcane }
+    })
+  const stripHelminth = (
+    helminth: Record<number, HelminthAbility> | undefined,
+  ): Record<number, HelminthAbility> | undefined => {
+    if (!helminth) return helminth
+    const next: Record<number, HelminthAbility> = {}
+    for (const [slot, ability] of Object.entries(helminth)) {
+      const { imageName: _drop, ...rest } = ability
+      next[Number(slot)] = rest
+    }
+    return next
+  }
+
+  return {
+    ...data,
+    slots: stripSlots(data.slots),
+    arcanes: stripArcanes(data.arcanes),
+    helminth: stripHelminth(data.helminth),
+    variants: data.variants?.map((v) => ({
+      ...v,
+      slots: stripSlots(v.slots) ?? v.slots,
+      arcanes: stripArcanes(v.arcanes) ?? v.arcanes,
+      helminth: stripHelminth(v.helminth),
+    })),
   }
 }
 
@@ -276,7 +416,21 @@ export function normalizeBuildData(
   const base = isLegacyBuildData(r)
     ? buildStateToSavedData(r, mods, arcanes).data
     : migrateLegacyAuraKey(r as SavedBuildData)
-  return refreshHelminthImage(base, helminthAbilities)
+  const withHelminth = refreshHelminthImage(base, helminthAbilities)
+
+  // Builds no longer persist mod/arcane `imageName` (see stripPersistedImages),
+  // so re-resolve it by `uniqueName`. When a catalog is supplied — the editor
+  // loads the full mods/arcanes — derive a map from it and patch. The viewer
+  // passes empty catalogs to skip the ~1.2 MB download and instead calls
+  // refreshImagesFromMap with the compact image-map.json after this. Legacy
+  // builds already carry fresh images from buildStateToSavedData; this is an
+  // idempotent confirmation for them.
+  if (mods.length === 0 && arcanes.length === 0) return withHelminth
+  const catalogMap: Record<string, string> = {}
+  for (const m of mods) if (m.imageName) catalogMap[m.uniqueName] = m.imageName
+  for (const a of arcanes)
+    if (a.imageName) catalogMap[a.uniqueName] = a.imageName
+  return refreshImagesFromMap(withHelminth, catalogMap)
 }
 
 // Synthetic single-variant identity used when a legacy / single-loadout build
@@ -341,13 +495,13 @@ export function selectVariant(
     incarnonEnabled: v.incarnonEnabled,
     incarnonPerks: v.incarnonPerks,
     deploymentContext: v.deploymentContext,
-    // formaPolarities, shards, hasReactor, zaw, lich, buildName are
+    // formaPolarities, shards, hasReactor, zaw, kitgun, lich, buildName are
     // shared across variants and stay as-is.
   }
 }
 
-// Older builds were saved when wfcd shipped content-hashed image filenames
-// (e.g. `roar-e206197372.png`); the newer `@wfcd/items` package uses canonical
+// Older builds were saved when the upstream CDN shipped content-hashed image
+// filenames (e.g. `roar-e206197372.png`); the newer naming uses canonical
 // names and the upstream CDN no longer maps the old hashed slugs. Mods and
 // arcanes are already re-resolved via `toEditorPlacedMod` upstream, but
 // `buildStateToSavedData` copies helminth fields verbatim — so refresh just

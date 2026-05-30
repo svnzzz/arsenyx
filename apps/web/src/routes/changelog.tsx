@@ -5,7 +5,6 @@ import { Header } from "@/components/header"
 
 interface ChangelogEntry {
   date: string
-  version?: string
   changes: {
     type: "feat" | "fix" | "refactor" | "chore"
     description: string
@@ -165,7 +164,7 @@ const CHANGELOG: ChangelogEntry[] = [
       },
       {
         type: "chore",
-        description: "Game data updated to the latest @wfcd/items.",
+        description: "Game data updated to the latest Warframe build.",
       },
     ],
   },
@@ -193,7 +192,7 @@ const CHANGELOG: ChangelogEntry[] = [
       },
       {
         type: "chore",
-        description: "Game data updated to the latest @wfcd/items.",
+        description: "Game data updated to the latest Warframe build.",
       },
     ],
   },
@@ -252,8 +251,7 @@ const CHANGELOG: ChangelogEntry[] = [
     changes: [
       {
         type: "chore",
-        description:
-          "Game data updated to Warframe 42.0.9 (wfcd/items 1.1274.12).",
+        description: "Game data updated to Warframe 42.0.9.",
       },
     ],
   },
@@ -347,7 +345,7 @@ const CHANGELOG: ChangelogEntry[] = [
       {
         type: "fix",
         description:
-          "Saved builds with stale wfcd image names now self-heal instead of showing broken cards.",
+          "Saved builds with stale image names now self-heal instead of showing broken cards.",
       },
       {
         type: "fix",

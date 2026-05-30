@@ -100,7 +100,19 @@ export function getMatchState(
   if (slotPolarity === "any") {
     return modPolarity === "umbra" ? "neutral" : "match"
   }
+  // An "any" (Universal) polarity mod fits every polarized slot, so it always
+  // earns the matching bonus — mirror of the "any"-polarity slot case above.
+  if (modPolarity === "any") return "match"
   return modPolarity === slotPolarity ? "match" : "mismatch"
+}
+
+/**
+ * Drain a mod contributes before any slot-polarity adjustment. Riven
+ * `baseDrain` is the user-configured drain at max rank (what the game
+ * displays); regular mods add 1 drain per rank on top of `baseDrain`.
+ */
+export function baseDrainForMod(mod: Mod, rank: number): number {
+  return isRivenMod(mod) ? mod.baseDrain : mod.baseDrain + rank
 }
 
 export function effectiveDrainForMod(
@@ -108,14 +120,15 @@ export function effectiveDrainForMod(
   rank: number,
   slotPolarity: Polarity | undefined,
 ): number {
-  // Riven `baseDrain` is the user-configured drain at max rank (what the
-  // game displays). Regular mods add 1 drain per rank on top of `baseDrain`.
-  const base = isRivenMod(mod) ? mod.baseDrain : mod.baseDrain + rank
+  const base = baseDrainForMod(mod, rank)
   if (!slotPolarity || slotPolarity === "universal") return base
   if (slotPolarity === "any") {
     return mod.polarity === "umbra" ? base : Math.ceil(base / 2)
   }
-  if (mod.polarity === slotPolarity) return Math.ceil(base / 2)
+  // "any"-polarity mods match every polarized slot (see getMatchState).
+  if (mod.polarity === "any" || mod.polarity === slotPolarity) {
+    return Math.ceil(base / 2)
+  }
   return Math.round(base * 1.25)
 }
 
@@ -129,7 +142,8 @@ export function auraBonusForMod(
   if (slotPolarity === "any") {
     return mod.polarity === "umbra" ? base : base * 2
   }
-  if (mod.polarity === slotPolarity) return base * 2
+  // "any"-polarity mods match every polarized slot (see getMatchState).
+  if (mod.polarity === "any" || mod.polarity === slotPolarity) return base * 2
   return Math.round(base * 0.75)
 }
 

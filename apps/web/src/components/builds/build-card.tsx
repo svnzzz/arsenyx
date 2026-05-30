@@ -8,37 +8,42 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { BuildListItem } from "@/lib/queries/builds-list-query"
+import { useItemImage } from "@/lib/use-item-image"
 import { formatAbsoluteTime, relativeTime } from "@/lib/util/relative-time"
 import { authorName } from "@/lib/util/user-display"
 import { getImageUrl } from "@/lib/warframe"
 
-export function BuildCard({ build }: { build: BuildListItem }) {
-  const author = authorName(build.user)
-  const timeAgo = relativeTime(build.updatedAt)
+/** Shared per-card derivation: relative timestamp and the current catalog
+ *  image URL resolved from the build's item. (Author is derived in
+ *  BuildByline, the only place it's rendered.) */
+function useBuildCardData(build: BuildListItem) {
+  const itemImage = useItemImage()
+  return {
+    timeAgo: relativeTime(build.updatedAt),
+    imageUrl: getImageUrl(
+      itemImage(build.item.uniqueName, build.item.imageName),
+    ),
+  }
+}
 
-  return (
-    <Link
-      to="/builds/$slug"
-      params={{ slug: build.slug }}
-      className="bg-card hover:bg-card/80 block overflow-hidden rounded-lg border transition-colors"
-    >
-      <div className="bg-muted/20 relative aspect-video">
-        <img
-          src={getImageUrl(build.item.imageName ?? undefined)}
-          alt={build.item.name}
-          className="absolute inset-0 h-full w-full object-contain p-2"
-        />
-      </div>
-      <div className="flex flex-col gap-1 p-3">
-        <h3 className="line-clamp-1 text-sm font-semibold" title={build.name}>
-          {build.name}
-        </h3>
-        <p className="text-muted-foreground line-clamp-1 text-xs">
-          {build.item.name}
-        </p>
+/** Byline line(s) crediting the org and/or author. `card` stacks two <p> rows
+ *  (org line + author line) to keep card heights aligned; `row` renders the
+ *  inline "· by …" variant used in the dense row layout. */
+function BuildByline({
+  build,
+  variant,
+}: {
+  build: BuildListItem
+  variant: "card" | "row"
+}) {
+  const author = authorName(build.user)
+
+  if (variant === "card") {
+    return (
+      <>
         <p className="text-muted-foreground line-clamp-1 text-xs">
           {build.organization ? (
-            <span className="text-[#a78bfa]">{build.organization.name}</span>
+            <span className="text-wf-org">{build.organization.name}</span>
           ) : (
             <>by {author}</>
           )}
@@ -53,6 +58,51 @@ export function BuildCard({ build }: { build: BuildListItem }) {
             <>&nbsp;</>
           )}
         </p>
+      </>
+    )
+  }
+
+  return build.organization ? (
+    <>
+      <span className="text-wf-org line-clamp-1">
+        {build.organization.name}
+      </span>
+      {!build.hideAuthor && (
+        <>
+          <span aria-hidden>·</span>
+          <span className="line-clamp-1">by {author}</span>
+        </>
+      )}
+    </>
+  ) : (
+    <span className="line-clamp-1">by {author}</span>
+  )
+}
+
+export function BuildCard({ build }: { build: BuildListItem }) {
+  const { timeAgo, imageUrl } = useBuildCardData(build)
+
+  return (
+    <Link
+      to="/builds/$slug"
+      params={{ slug: build.slug }}
+      className="bg-card hover:bg-card/80 block overflow-hidden rounded-lg border transition-colors"
+    >
+      <div className="bg-muted/20 relative aspect-video">
+        <img
+          src={imageUrl}
+          alt={build.item.name}
+          className="absolute inset-0 h-full w-full object-contain p-2"
+        />
+      </div>
+      <div className="flex flex-col gap-1 p-3">
+        <h3 className="line-clamp-1 text-sm font-semibold" title={build.name}>
+          {build.name}
+        </h3>
+        <p className="text-muted-foreground line-clamp-1 text-xs">
+          {build.item.name}
+        </p>
+        <BuildByline build={build} variant="card" />
         <div className="text-muted-foreground flex items-center justify-between text-xs">
           <span className="flex items-center gap-2">
             <span className="flex items-center gap-1">
@@ -77,8 +127,7 @@ export function BuildCard({ build }: { build: BuildListItem }) {
 }
 
 export function BuildRow({ build }: { build: BuildListItem }) {
-  const author = authorName(build.user)
-  const timeAgo = relativeTime(build.updatedAt)
+  const { timeAgo, imageUrl } = useBuildCardData(build)
 
   return (
     <Link
@@ -88,7 +137,7 @@ export function BuildRow({ build }: { build: BuildListItem }) {
     >
       <div className="bg-muted/20 relative size-14 shrink-0 overflow-hidden rounded-md sm:size-16">
         <img
-          src={getImageUrl(build.item.imageName ?? undefined)}
+          src={imageUrl}
           alt={build.item.name}
           className="absolute inset-0 h-full w-full object-contain p-1"
         />
@@ -100,21 +149,7 @@ export function BuildRow({ build }: { build: BuildListItem }) {
         <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 text-xs">
           <span className="line-clamp-1">{build.item.name}</span>
           <span aria-hidden>·</span>
-          {build.organization ? (
-            <>
-              <span className="line-clamp-1 text-[#a78bfa]">
-                {build.organization.name}
-              </span>
-              {!build.hideAuthor && (
-                <>
-                  <span aria-hidden>·</span>
-                  <span className="line-clamp-1">by {author}</span>
-                </>
-              )}
-            </>
-          ) : (
-            <span className="line-clamp-1">by {author}</span>
-          )}
+          <BuildByline build={build} variant="row" />
         </div>
       </div>
       <div className="text-muted-foreground flex shrink-0 items-center gap-3 text-xs">

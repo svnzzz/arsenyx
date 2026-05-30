@@ -1,6 +1,7 @@
 import {
   getArcanesForCategory,
   getArcanesForSlot,
+  getArcanesForWeapon,
   isZawArcane,
   type ArcaneSlotType,
 } from "@arsenyx/shared/warframe/arcanes"
@@ -18,8 +19,12 @@ export {
   hasExilusSlot,
 } from "@arsenyx/shared/warframe/slot-layout"
 
-function isZawComponent(itemType: DetailItem["type"]): boolean {
-  return itemType === "Zaw Component"
+/** Zaw strikes are emitted as individual items with a wiki Class like
+ *  "Zaw Dagger / Staff", "Zaw Polearm / Hammer", etc. The "Zaw " prefix is
+ *  the stable marker — we treat the whole family as Zaw components for
+ *  layout purposes (extra Exodia arcane slot, single-slot stance pool). */
+function isZawComponent(displayClass: DetailItem["displayClass"]): boolean {
+  return displayClass?.startsWith("Zaw ") ?? false
 }
 
 /** Resolve which arcane pool an exalted weapon draws from. Mirrors the
@@ -40,7 +45,7 @@ function getExaltedArcaneSlot(
  * have none. */
 export function getArcaneSlotCount(
   category: BrowseCategory,
-  itemType: DetailItem["type"],
+  displayClass: DetailItem["displayClass"],
 ): number {
   switch (category) {
     case "warframes":
@@ -48,13 +53,14 @@ export function getArcaneSlotCount(
     case "melee":
       // Zaws have a dedicated Exodia slot in addition to the regular Melee
       // Arcane slot — both can be active simultaneously in-game.
-      return isZawComponent(itemType) ? 2 : 1
+      return isZawComponent(displayClass) ? 2 : 1
     case "primary":
     case "secondary":
     case "exalted-weapons":
       return 1
     case "archwing":
-      return itemType === "Arch-Gun" ? 2 : 0
+      // Wiki Class is "Archgun" (no hyphen) for arch-gun primaries.
+      return displayClass === "Archgun" ? 2 : 0
     default:
       return 0
   }
@@ -72,7 +78,7 @@ export function getArcaneSlotConfig(
   allArcanes: Arcane[],
   category: BrowseCategory,
   count: number,
-  item?: Pick<DetailItem, "name" | "trigger" | "type">,
+  item?: Pick<DetailItem, "name" | "trigger" | "displayClass" | "uniqueName">,
 ): ArcaneSlotConfig {
   if (count === 0) return { options: [] }
   if (category === "archwing") {
@@ -88,13 +94,23 @@ export function getArcaneSlotConfig(
     const slot = getExaltedArcaneSlot(item)
     return { options: [getArcanesForSlot(allArcanes, slot)] }
   }
-  if (category === "melee" && item && isZawComponent(item.type)) {
+  if (category === "melee" && item && isZawComponent(item.displayClass)) {
     const regular: Arcane[] = []
     const exodia: Arcane[] = []
     for (const a of getArcanesForSlot(allArcanes, "melee")) {
       ;(isZawArcane(a) ? exodia : regular).push(a)
     }
     return { options: [regular, exodia], labels: ["Melee Arcane", "Exodia"] }
+  }
+  // Primary/secondary: gate the weapon-type sub-pools (Shotgun/Bow/Kitgun
+  // arcanes) by this weapon's own class so e.g. a rifle doesn't see shotgun
+  // or kitgun arcanes. Falls back to the broad per-category pool when we have
+  // no item to inspect.
+  if (category === "primary" || category === "secondary") {
+    const shared = item
+      ? getArcanesForWeapon(allArcanes, category, item)
+      : getArcanesForCategory(allArcanes, category)
+    return { options: Array.from({ length: count }, () => shared) }
   }
   const shared = getArcanesForCategory(allArcanes, category)
   return { options: Array.from({ length: count }, () => shared) }
@@ -107,10 +123,10 @@ export function getArcaneSlotConfig(
  * longer authoritative.
  */
 export function resolveInitialArcanes(
-  item: Pick<DetailItem, "type">,
+  item: Pick<DetailItem, "displayClass">,
   arcanes: (PlacedArcane | null)[] | undefined,
 ): (PlacedArcane | null)[] | undefined {
-  if (!isZawComponent(item.type) || !arcanes) return arcanes
+  if (!isZawComponent(item.displayClass) || !arcanes) return arcanes
   const out: (PlacedArcane | null)[] = [null, null]
   for (const a of arcanes) {
     if (!a) continue
@@ -122,7 +138,7 @@ export function resolveInitialArcanes(
 
 /**
  * Whether to render a Stance slot. Driven by the item carrying a
- * `stancePolarity` (set by WFCD on every melee and on some exalted melees).
+ * `stancePolarity` (present on every melee and on some exalted melees).
  * Arch-melee weapons do not carry stancePolarity and so get no slot.
  * Exalted melees have a stance pre-applied in-game and the player cannot
  * swap it, so we skip the slot entirely for the `exalted-weapons` category.
@@ -132,23 +148,23 @@ export function resolveInitialArcanes(
  * surface the slot (innate polarity unknown; user can forma).
  */
 export function hasStanceSlot(
-  item: Pick<DetailItem, "stancePolarity" | "type">,
+  item: Pick<DetailItem, "stancePolarity" | "displayClass">,
   category: BrowseCategory,
 ): boolean {
   if (category === "exalted-weapons") return false
   if (category === "railjack") return false
-  if (isZawComponent(item.type)) return true
+  if (isZawComponent(item.displayClass)) return true
   return Boolean(item.stancePolarity)
 }
 
 /**
- * Number of Aura slots for an item. Warframes derive from `item.aura` —
- * an array means multiple aura slots (Jade: 2). Companions and other
- * categories have none.
+ * Number of Aura slots for an item. Warframes derive from
+ * `item.auraPolarity` — an array means multiple aura slots (Jade: 2).
+ * Companions and other categories have none.
  */
 export function getAuraSlotCount(
   category: BrowseCategory,
-  item: Pick<DetailItem, "aura">,
+  item: Pick<DetailItem, "auraPolarity">,
 ): number {
   // Plexus has an Aura slot in the Integrated section — accepts any Plexus
   // mod and inverts drain to a capacity bonus. The Plexus-mod placement
@@ -156,8 +172,8 @@ export function getAuraSlotCount(
   // capacity math reuses `auraBonusForMod` without changes.
   if (category === "railjack") return 1
   if (category !== "warframes") return 0
-  if (Array.isArray(item.aura)) return item.aura.length
-  return item.aura ? 1 : 0
+  if (Array.isArray(item.auraPolarity)) return item.auraPolarity.length
+  return item.auraPolarity ? 1 : 0
 }
 
 // =============================================================================
@@ -196,7 +212,7 @@ export function getPlexusGroupForIndex(
 }
 
 /**
- * Max rank for an item. Necramechs overlevel to 40 (not flagged in WFCD data).
+ * Max rank for an item. Necramechs overlevel to 40 (not flagged in the item data).
  * Kuva/Tenet/Coda weapons + Paracesis carry `maxLevelCap: 40` in their JSON.
  * Undefined for normal-rank items; `calculateCapacity` treats that as 30.
  */

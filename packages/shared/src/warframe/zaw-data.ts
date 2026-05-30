@@ -319,14 +319,6 @@ export function isZawStrike(name: string): boolean {
   return strikeMap.has(name)
 }
 
-export function isZawGrip(name: string): boolean {
-  return gripMap.has(name)
-}
-
-export function isZawLink(name: string): boolean {
-  return linkMap.has(name)
-}
-
 export function getZawStrike(name: string): ZawStrike | undefined {
   return strikeMap.get(name)
 }
@@ -339,23 +331,11 @@ export function getZawLink(name: string): ZawLink | undefined {
   return linkMap.get(name)
 }
 
-export function getZawComponentImage(name: string): string | undefined {
-  return (
-    strikeMap.get(name)?.imageName ??
-    gripMap.get(name)?.imageName ??
-    linkMap.get(name)?.imageName
-  )
-}
-
-export function getZawWeaponType(
-  strikeName: string,
-  gripName: string,
-): string | null {
-  const strike = strikeMap.get(strikeName)
-  const grip = gripMap.get(gripName)
-  if (!strike || !grip) return null
-  return grip.oneHanded ? strike.oneHanded : strike.twoHanded
-}
+// Component thumbnail URLs are resolved at build time from the DE manifest
+// (keyed by the `imageName` filenames above) and emitted to
+// `apps/web/public/data/zaw-images.json`; the web picker loads that map via
+// `zawImagesQuery`. The old `Special:FilePath` wiki redirect 404s on the
+// current wiki, so runtime URL construction was removed.
 
 export const ZAW_DEFAULT_GRIP = "Jayap"
 export const ZAW_DEFAULT_LINK = "Jai"

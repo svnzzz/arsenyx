@@ -27,6 +27,7 @@ import {
   myApiKeysQuery,
   revokeApiKey,
 } from "@/lib/queries/me-query"
+import { formatLocaleDate } from "@/lib/util/relative-time"
 
 import { SignedOutNotice } from "./shared"
 
@@ -54,16 +55,10 @@ function expiryToDate(v: ExpiryValue): string | null {
   }
 }
 
-function formatDate(iso: string | null, fallback = "Never") {
-  if (!iso) return fallback
-  return new Date(iso).toLocaleDateString()
-}
-
 type ScopeOption = {
   value: string
   label: string
   description: string
-  privileged?: boolean
 }
 
 const SCOPE_OPTIONS: readonly ScopeOption[] = [
@@ -79,9 +74,7 @@ const SCOPE_OPTIONS: readonly ScopeOption[] = [
   },
 ]
 
-const DEFAULT_SCOPES = SCOPE_OPTIONS.filter((s) => !s.privileged).map(
-  (s) => s.value,
-)
+const DEFAULT_SCOPES = SCOPE_OPTIONS.map((s) => s.value)
 
 export function ApiKeysPanel() {
   const { data: session } = authClient.useSession()
@@ -125,11 +118,6 @@ export function ApiKeysPanel() {
 
 function CreateApiKeyForm({ disabled }: { disabled: boolean }) {
   const queryClient = useQueryClient()
-  const { data: session } = authClient.useSession()
-  const user = session?.user as
-    | { isAdmin?: boolean; isModerator?: boolean }
-    | undefined
-  const canUsePrivileged = user?.isAdmin === true || user?.isModerator === true
 
   const [name, setName] = React.useState("")
   const [expiry, setExpiry] = React.useState<ExpiryValue>("never")
@@ -252,18 +240,16 @@ function CreateApiKeyForm({ disabled }: { disabled: boolean }) {
           Controls which endpoints this key can access.
         </FieldDescription>
         <div className="flex flex-col gap-1.5">
-          {SCOPE_OPTIONS.filter((s) => !s.privileged || canUsePrivileged).map(
-            (s) => (
-              <ScopeCheckbox
-                key={s.value}
-                id={`scope-${s.value}`}
-                label={s.label}
-                description={s.description}
-                checked={scopes.has(s.value)}
-                onChange={() => toggleScope(s.value)}
-              />
-            ),
-          )}
+          {SCOPE_OPTIONS.map((s) => (
+            <ScopeCheckbox
+              key={s.value}
+              id={`scope-${s.value}`}
+              label={s.label}
+              description={s.description}
+              checked={scopes.has(s.value)}
+              onChange={() => toggleScope(s.value)}
+            />
+          ))}
         </div>
       </Field>
       {create.error ? (
@@ -349,9 +335,9 @@ function ApiKeyRow({ apiKey }: { apiKey: ApiKeySummary }) {
           {apiKey.keyPrefix}…
         </code>
         <span className="text-muted-foreground text-xs">
-          Created {formatDate(apiKey.createdAt)} · Expires{" "}
-          {formatDate(apiKey.expiresAt)} · Last used{" "}
-          {formatDate(apiKey.lastUsedAt)} · {apiKey.rateLimit}/min
+          Created {formatLocaleDate(apiKey.createdAt)} · Expires{" "}
+          {formatLocaleDate(apiKey.expiresAt)} · Last used{" "}
+          {formatLocaleDate(apiKey.lastUsedAt)} · {apiKey.rateLimit}/min
         </span>
       </div>
       {apiKey.isActive ? (

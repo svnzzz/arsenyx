@@ -1,26 +1,35 @@
 /**
  * Minimal client-side warframe helpers. The heavy data loading lives at
- * build time in legacy/scripts/build-items-index.ts — the frontend only
+ * build time in scripts/build-items-index.ts — the frontend only
  * needs enough to render cards and link to detail pages.
  */
 
-import type { BrowseCategory } from "@arsenyx/shared/warframe/types"
-export type { BrowseCategory } from "@arsenyx/shared/warframe/types"
-
-const WFCD_CDN_BASE = "https://cdn.warframestat.us/img"
+import type { BrowseCategory, BrowseItem } from "@arsenyx/shared/warframe/types"
+export type { BrowseCategory, BrowseItem } from "@arsenyx/shared/warframe/types"
 
 const PLACEHOLDER_URL =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Crect fill='%23374151' width='128' height='128' rx='8'/%3E%3Ctext x='64' y='72' text-anchor='middle' fill='%236b7280' font-family='system-ui' font-size='48' font-weight='bold'%3E%3F%3C/text%3E%3C/svg%3E"
 
+/** Hosts the build pipeline is allowed to emit absolute URLs against.
+ *  Production catalog points at `img.arsenyx.com` (our R2 bucket, see
+ *  `scripts/sync-images.ts`). The two upstream hosts are also accepted
+ *  so a dev workflow that ran `build:items` without `sync:images` still
+ *  renders correctly. Anything else falls through to the placeholder,
+ *  so an attacker-controlled value can't reach `<img src>`. */
+const TRUSTED_IMAGE_PREFIXES = [
+  "https://img.arsenyx.com/",
+  "https://content.warframe.com/PublicExport/",
+  "https://wiki.warframe.com/images/",
+] as const
+
 export function getImageUrl(imageName?: string): string {
   if (!imageName) return PLACEHOLDER_URL
-  // Locally-hosted icons (e.g. our hardcoded beast-claws icon) live under
-  // `/img/`. Anything else is treated as a WFCD CDN filename — including
-  // attacker-controlled inputs like `//evil.com/x` or `/api/anything`,
-  // which would otherwise short-circuit to a third-party / same-origin
-  // request when rendered into an <img src>.
+  // Locally-hosted icons live under `/img/`.
   if (imageName.startsWith("/img/")) return imageName
-  return `${WFCD_CDN_BASE}/${imageName}`
+  for (const prefix of TRUSTED_IMAGE_PREFIXES) {
+    if (imageName.startsWith(prefix)) return imageName
+  }
+  return PLACEHOLDER_URL
 }
 
 export function getItemUrl(category: string, slug: string): string {
@@ -43,19 +52,6 @@ export function formatPct(
   return `${(v * 100).toFixed(digits)}%`
 }
 
-export interface BrowseItem {
-  uniqueName: string
-  name: string
-  slug: string
-  category: BrowseCategory
-  imageName?: string
-  masteryReq?: number
-  isPrime?: boolean
-  vaulted?: boolean
-  type?: string
-  releaseDate?: string
-}
-
 export type ItemsIndex = Partial<Record<BrowseCategory, BrowseItem[]>>
 
 export interface ItemAbility {
@@ -67,12 +63,13 @@ export interface ItemAbility {
 
 export interface DetailItem extends BrowseItem {
   description?: string
-  // slot polarities (from WFCD): `aura` is warframe-only, `polarities` lists
-  // innate polarities on normal slots in slot order, `exilusPolarity` is the
-  // innate polarity on the exilus slot (weapons + warframes).
-  aura?: string | string[]
+  // slot polarities. `auraPolarity` is warframe-only (array on multi-aura
+  // frames like Jade), `polarities` lists innate polarities on normal slots
+  // in slot order, `exilusPolarity` is the innate polarity on the exilus
+  // slot (weapons + warframes).
+  auraPolarity?: string | string[] | null
   polarities?: string[]
-  exilusPolarity?: string
+  exilusPolarity?: string | null
   stancePolarity?: string
   meleeClass?: string
   // warframe
@@ -108,6 +105,10 @@ export interface DetailItem extends BrowseItem {
   // Beast claws (hardcoded synthetic entries): lowercased compatNames the
   // weapon accepts. Used by getModsForItem to pick claws/family/pet mods.
   compatGroups?: string[]
+  /** Structural mod routing: DE `compatName` values this item accepts.
+   *  Emitted by the build on every weapon/frame/companion and consumed by
+   *  `getModsForItem`. */
+  modPools?: readonly string[]
 }
 
 export const CATEGORIES: { id: BrowseCategory; label: string }[] = [
@@ -120,6 +121,9 @@ export const CATEGORIES: { id: BrowseCategory; label: string }[] = [
   { id: "archwing", label: "Archwing" },
   { id: "necramechs", label: "Necramechs" },
   { id: "exalted-weapons", label: "Exalted" },
+  // Railjack tab only surfaces the Plexus (the mod-equip entry point).
+  // Turrets, ordnance, and reactors are sidebar pickers inside the Plexus
+  // editor — they live in the catalog but are not browseable items.
   { id: "railjack", label: "Railjack" },
 ]
 

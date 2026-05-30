@@ -120,13 +120,15 @@ function innatePolarityFor(
 ): Polarity | undefined {
   if (slotId.startsWith("aura-")) {
     const idx = Number(slotId.slice("aura-".length))
-    const a = detail.aura
+    const a = detail.auraPolarity
     if (!a) return undefined
     return (Array.isArray(a) ? a[idx] : idx === 0 ? a : undefined) as
       | Polarity
       | undefined
   }
-  if (slotId === "exilus") return undefined // not stored in items index
+  if (slotId === "exilus") {
+    return (detail.exilusPolarity ?? undefined) as Polarity | undefined
+  }
   if (slotId.startsWith("normal-")) {
     const idx = Number(slotId.slice("normal-".length))
     return (detail.polarities?.[idx] ?? undefined) as Polarity | undefined

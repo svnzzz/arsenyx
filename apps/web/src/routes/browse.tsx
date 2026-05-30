@@ -145,13 +145,21 @@ function BrowseContent() {
     searchRef.current?.select()
   })
 
-  const items = useMemo(
-    () =>
-      category === "all"
-        ? CATEGORIES.flatMap((c) => data[c.id] ?? [])
-        : (data[category] ?? []),
-    [data, category],
-  )
+  const items = useMemo(() => {
+    if (category !== "all") return data[category] ?? []
+    // A few items are listed under more than one category (e.g. atmospheric
+    // arch-gun variants). Dedup the "All" view by the same uniqueName|slug key
+    // the cards use, so nothing double-renders. Atmosphere variants share a
+    // uniqueName but differ by slug, so both legitimately survive.
+    const byKey = new Map<string, BrowseItem>()
+    for (const c of CATEGORIES) {
+      for (const it of data[c.id] ?? []) {
+        const key = `${it.uniqueName}|${it.slug}`
+        if (!byKey.has(key)) byKey.set(key, it)
+      }
+    }
+    return [...byKey.values()]
+  }, [data, category])
 
   const visible = useMemo(
     () =>
@@ -241,7 +249,14 @@ function BrowseContent() {
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {visible.map((item, i) => (
-            <ItemCard key={item.uniqueName} item={item} index={i} />
+            // Atmosphere arch-gun variants share `uniqueName` with their base
+            // (e.g. Mausolon / Mausolon (Atmosphere)), so include the slug to
+            // keep React keys unique within a category.
+            <ItemCard
+              key={`${item.uniqueName}|${item.slug}`}
+              item={item}
+              index={i}
+            />
           ))}
         </div>
       )}
@@ -272,7 +287,7 @@ function filterAndSort(
   const filtered = items.filter((item) => {
     if (term) {
       const nameMatch = item.name.toLowerCase().includes(term)
-      const typeMatch = item.type?.toLowerCase().includes(term)
+      const typeMatch = item.displayClass?.toLowerCase().includes(term)
       if (!nameMatch && !typeMatch) return false
     }
     if (item.masteryReq !== undefined && item.masteryReq > masteryMax)

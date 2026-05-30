@@ -77,7 +77,7 @@ export function ArcaneCard({
     >
       <div className="relative mt-1.5 h-[65px] w-[80px] overflow-hidden rounded">
         <img
-          src={getArcaneImageUrl(arcane.name)}
+          src={getArcaneImageUrl(arcane.imageName)}
           alt={arcane.name}
           className="h-full w-full object-cover"
         />
@@ -151,12 +151,9 @@ export function ArcaneSlot({
 }: ArcaneSlotProps) {
   const [open, setOpen] = useState(false)
 
-  const arcaneStats: string[] =
-    placed && placed.arcane.levelStats && placed.arcane.levelStats.length > 0
-      ? (placed.arcane.levelStats[
-          Math.min(placed.rank, placed.arcane.levelStats.length - 1)
-        ]?.stats ?? [])
-      : []
+  const arcaneStats: string[] = placed
+    ? statsAt(placed.arcane, placed.rank)
+    : []
 
   const handleContextMenu = (e: MouseEvent) => {
     if (readOnly) return
@@ -226,7 +223,7 @@ export function ArcaneSlot({
             <div className="flex flex-col gap-2" style={{ maxWidth: 280 }}>
               <div className="flex items-center gap-3">
                 <img
-                  src={getArcaneImageUrl(placed.arcane.name)}
+                  src={getArcaneImageUrl(placed.arcane.imageName)}
                   alt=""
                   className="size-12 shrink-0 rounded object-cover"
                 />
@@ -281,7 +278,7 @@ function ArcanePicker({
     if (!q) return sorted
     return sorted.filter((a) => {
       if (a.name.toLowerCase().includes(q)) return true
-      const last = a.levelStats?.[a.levelStats.length - 1]?.stats ?? []
+      const last = statsAt(a, (a.levelStats?.length ?? 0) - 1)
       return last.some((s) => s.toLowerCase().includes(q))
     })
   }, [sorted, deferred])
@@ -326,7 +323,7 @@ function ArcanePicker({
               )}
             >
               <img
-                src={getArcaneImageUrl(arcane.name)}
+                src={getArcaneImageUrl(arcane.imageName)}
                 alt=""
                 className="size-10 shrink-0 rounded object-cover"
               />

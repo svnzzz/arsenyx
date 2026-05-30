@@ -26,9 +26,13 @@ deploy-web:
 deploy-api:
     bun run deploy
 
-# Regenerate the static browse data (items-index.json + per-item JSON).
+# Regenerate the static browse data (items-index.json + per-item JSON),
+# then mirror any new images into R2 and rewrite the catalog to our CDN.
+# sync:images self-skips if R2 creds aren't in the root .env (CI's
+# check:images guard then blocks a hotlinked catalog from merging).
 build-items-index:
     bun run build:items
+    bun run sync:images --skip-if-no-creds
 
 # Kill dev servers on ports 5173/5174 (Vite + fallback), 8787 (Hono).
 [unix]
@@ -53,9 +57,10 @@ stop:
 setup:
     bun run scripts/setup.ts
 
-# Update game data (WFCD items + browse index).
+# Refresh game data: mirror DE PublicExport + wiki Lua, then rebuild
+# the static catalog. Same steps the weekly CI cron runs.
 update-data:
-    bun run update-data
+    bun run data:bump
 
 # Ensure apps/web/src/routeTree.gen.ts exists. Vite's router-plugin
 # generates it during build, but `bun run typecheck` (and editors) need
@@ -81,7 +86,9 @@ fix:
     bun run lint:fix
     bun run fmt
 
-# Run vitest across all workspaces with tests. Keep this list in sync with the
-# Test step in .github/workflows/ci.yml when adding a workspace.
+# Run vitest across all workspaces with tests, plus the build-pipeline tests
+# under scripts/ (run via `bun test`). Keep in sync with the Test steps in
+# .github/workflows/ci.yml when adding a workspace.
 test:
     bun --filter=arsenyx-web --filter=arsenyx-api --filter=@arsenyx/shared run test
+    bun test scripts/build/

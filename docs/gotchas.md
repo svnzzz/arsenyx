@@ -8,6 +8,11 @@ Non-obvious pitfalls. Add to this file when you hit one.
 - **PowerShell doesn't support `<` redirection** — wrap in `bash -c '...'` for Docker stdin (e.g. piping SQL into `psql`).
 - **cssstudio is OFF by default in dev.** Toggle via URL: append `?cssstudio=1` to enable, `?cssstudio=0` to disable. The flag persists in `localStorage.arsenyx.cssstudio` and the param strips itself after apply. See [apps/web/src/main.tsx](../apps/web/src/main.tsx).
 
+## R2 image hosting (img.arsenyx.com)
+
+- **R2 served via a Custom Domain does NOT edge-cache objects that lack a `Cache-Control` header** — Cloudflare returns `Cf-Cache-Status: BYPASS` and every request round-trips to the R2 origin. [scripts/sync-images.ts](../scripts/sync-images.ts) sets `Cache-Control: public, max-age=31536000, immutable` on upload (keys are content-hashed, so the bytes never change). If you change that header, re-apply it to existing objects with `bun run sync:images --refresh-metadata` (CopyObject, no re-download). Verify with `curl -sSI https://img.arsenyx.com/<key>` → expect `HIT` on the second hit.
+- Non-default-cacheable extensions (anything outside png/jpg/jpeg/gif/webp/svg/ico) still need a zone **Cache Rule** ("Cache Everything") to cache even with the header. We only serve default-cacheable image types today, so the header alone suffices.
+
 ## Shadcn in the monorepo
 
 The `shadcn` skill's bootstrap runs `shadcn info` from cwd and errors at the monorepo root (`error: monorepo_root`). Workarounds:
@@ -24,7 +29,7 @@ Never modify existing files in `apps/web/src/components/ui/` — override via `c
 - `Select` — `onValueChange` receives `string | null`.
 - `Select` — for `SelectValue` to render a label for the current value, pass an `items={[{ value, label }]}` prop to `<Select>`. Without it, `SelectValue` falls back to showing the raw value string (so `value={null}` renders literally as `null`, `value="__none__"` renders as `__none__`). Use `value: null` for the "no selection" entry. Reference: [select-example.tsx](https://raw.githubusercontent.com/shadcn-ui/ui/refs/heads/main/apps/v4/registry/bases/base/examples/select-example.tsx).
 
-## WFCD data quirks
+## Item data quirks
 
 - Item fields vary types across items — e.g. `aura` is `string` on most warframes but `string[]` on Jade. Always handle both forms.
-- Set crest filenames under [apps/web/public/mod-set-icons/](../apps/web/public/mod-set-icons/) are WFCD `modSet` path segments — rerun [scripts/tint-set-crests.py](../scripts/tint-set-crests.py) when WFCD adds a new set or renames a codename. Aliases live in [apps/web/src/lib/mod-card-config.ts](../apps/web/src/lib/mod-card-config.ts) (`SET_CODE_ALIASES`).
+- Set crest filenames under [apps/web/public/mod-set-icons/](../apps/web/public/mod-set-icons/) are `modSet` path segments — rerun [scripts/tint-set-crests.py](../scripts/tint-set-crests.py) when a new set ships or a codename changes. Aliases live in [apps/web/src/lib/mod-card-config.ts](../apps/web/src/lib/mod-card-config.ts) (`SET_CODE_ALIASES`).

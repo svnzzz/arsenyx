@@ -20,13 +20,7 @@ import { cn } from "@/lib/util/utils"
 import { formatStat } from "@/lib/warframe"
 
 import { useAbilityStatReorder } from "./ability-stat-reorder"
-import {
-  ContribRow,
-  formatContribAmount,
-  formatSum,
-  groupContributions,
-  StatLine,
-} from "./stat-display"
+import { GroupedContribs, StatLine } from "./stat-display"
 import {
   useAbilityStatOrder,
   type AbilityStatKey,
@@ -102,7 +96,7 @@ export function WarframeStatsPanel({ stats }: { stats: WarframeStats }) {
 }
 
 export function WeaponStatsPanel({ stats }: { stats: WeaponStats }) {
-  const { attackModes, multishot, grandTotalDamage } = stats
+  const { attackModes, multishot } = stats
   const showMultiple = attackModes.length > 1
   const primary = attackModes[0]
 
@@ -162,18 +156,6 @@ export function WeaponStatsPanel({ stats }: { stats: WeaponStats }) {
           showHeader={showMultiple}
         />
       ))}
-
-      {showMultiple && (
-        <>
-          <Separator />
-          <StatLine
-            label="Total"
-            value={grandTotalDamage}
-            digits={1}
-            emphasis
-          />
-        </>
-      )}
     </div>
   )
 }
@@ -198,15 +180,26 @@ function AttackModeBlock({
 
   return (
     <div className="flex flex-col gap-1.5">
-      {showHeader && (
+      {showHeader ? (
         <>
           <Separator />
-          <div className="text-muted-foreground mt-1 text-[10px] font-semibold tracking-wide uppercase">
-            {mode.name}
+          <div className="mt-1 flex items-baseline justify-between gap-2">
+            <span className="text-muted-foreground text-[10px] font-semibold tracking-wide uppercase">
+              {mode.name}
+            </span>
+            <span className="text-foreground font-semibold tabular-nums">
+              {formatStat(scaledTotal.modified, 1)}
+            </span>
           </div>
         </>
+      ) : (
+        <StatLine
+          label="Total Damage"
+          value={scaledTotal}
+          digits={1}
+          emphasis
+        />
       )}
-      <StatLine label="Total Damage" value={scaledTotal} digits={1} emphasis />
 
       {physical.length > 0 && (
         <>
@@ -294,7 +287,6 @@ function DamageFormula({
   entry: DamageEntry
   multishot: number
 }) {
-  const grouped = groupContributions(entry.contributions)
   const scaled = entry.value * multishot
   return (
     <div className="flex flex-col gap-1.5">
@@ -316,23 +308,7 @@ function DamageFormula({
           {formatStat(scaled, 1)}
         </span>
       </div>
-      {grouped.map((g, i) => (
-        <div key={i} className="flex flex-col gap-0.5">
-          <Separator />
-          <div className="text-muted-foreground text-[10px] tracking-wide uppercase">
-            {g.label}{" "}
-            <span className="tabular-nums">({formatSum(g.contribs)})</span>
-          </div>
-          {g.contribs.map((c, j) => (
-            <ContribRow
-              key={j}
-              name={c.name}
-              amount={formatContribAmount(c)}
-              positive={c.amount > 0}
-            />
-          ))}
-        </div>
-      ))}
+      <GroupedContribs contribs={entry.contributions} />
       {multishot > 1.001 && (
         <>
           <Separator />

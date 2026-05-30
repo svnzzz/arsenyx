@@ -134,6 +134,23 @@ const PUBLIC_ENDPOINTS: Endpoint[] = [
   },
 ]
 
+function EndpointCard({ ep }: { ep: Endpoint }) {
+  return (
+    <li className="border-border bg-card flex flex-col gap-2 rounded-lg border p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="bg-muted rounded px-2 py-0.5 font-mono text-xs font-semibold">
+          {ep.method}
+        </span>
+        <code className="text-sm font-medium">{ep.path}</code>
+      </div>
+      <p className="text-muted-foreground text-sm">{ep.summary}</p>
+      <pre className="bg-muted/50 overflow-x-auto rounded p-3 text-xs leading-relaxed">
+        <code>{ep.example}</code>
+      </pre>
+    </li>
+  )
+}
+
 function DocsApiPage() {
   return (
     <div className="relative flex min-h-screen flex-col">
@@ -166,21 +183,7 @@ function DocsApiPage() {
           </p>
           <ul className="not-prose flex list-none flex-col gap-4 pl-0">
             {PUBLIC_ENDPOINTS.map((ep) => (
-              <li
-                key={`${ep.method} ${ep.path}`}
-                className="border-border bg-card flex flex-col gap-2 rounded-lg border p-4"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="bg-muted rounded px-2 py-0.5 font-mono text-xs font-semibold">
-                    {ep.method}
-                  </span>
-                  <code className="text-sm font-medium">{ep.path}</code>
-                </div>
-                <p className="text-muted-foreground text-sm">{ep.summary}</p>
-                <pre className="bg-muted/50 overflow-x-auto rounded p-3 text-xs leading-relaxed">
-                  <code>{ep.example}</code>
-                </pre>
-              </li>
+              <EndpointCard key={`${ep.method} ${ep.path}`} ep={ep} />
             ))}
           </ul>
           <p className="text-sm opacity-75">
@@ -199,21 +202,7 @@ function DocsApiPage() {
           </p>
           <ul className="not-prose flex list-none flex-col gap-4 pl-0">
             {WRITE_ENDPOINTS.map((ep) => (
-              <li
-                key={`${ep.method} ${ep.path}`}
-                className="border-border bg-card flex flex-col gap-2 rounded-lg border p-4"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="bg-muted rounded px-2 py-0.5 font-mono text-xs font-semibold">
-                    {ep.method}
-                  </span>
-                  <code className="text-sm font-medium">{ep.path}</code>
-                </div>
-                <p className="text-muted-foreground text-sm">{ep.summary}</p>
-                <pre className="bg-muted/50 overflow-x-auto rounded p-3 text-xs leading-relaxed">
-                  <code>{ep.example}</code>
-                </pre>
-              </li>
+              <EndpointCard key={`${ep.method} ${ep.path}`} ep={ep} />
             ))}
           </ul>
           <p className="text-sm opacity-75">
@@ -287,15 +276,16 @@ function DocsApiPage() {
           <h2 id="game-data">Game data</h2>
           <p>
             Items, mods, and arcanes live as static JSON under{" "}
-            <code>apps/web/public/data/</code>. The index is generated from the{" "}
+            <code>apps/web/public/data/</code>. The index is built from Digital
+            Extremes&apos; PublicExport manifests and the{" "}
             <Link
-              href={EXTERNAL_LINKS.wfcd}
+              href={EXTERNAL_LINKS.wiki}
               target="_blank"
               rel="noopener noreferrer"
             >
-              Warframe Community Developers
-            </Link>{" "}
-            dataset and committed to the repo, so loading game data is a single
+              Warframe wiki
+            </Link>
+            , then committed to the repo, so loading game data is a single
             static fetch against the CDN — no API round-trip.
           </p>
 

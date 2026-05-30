@@ -33,7 +33,6 @@ export type StatType =
   | "viral"
   | "corrosive"
   | "tau_resistance"
-  | "melee_damage"
   | "status_duration"
   | "damage_vs_grineer"
   | "damage_vs_corpus"
@@ -65,7 +64,7 @@ export type DamageType =
   | "void"
   | "tau"
 
-export type StatOperation = "flat_add" | "percent_add" | "percent_mult"
+export type StatOperation = "flat_add" | "percent_add"
 
 export interface ParsedStat {
   type: StatType
@@ -129,7 +128,6 @@ export interface AttackModeStats {
 export interface WeaponStats {
   attackModes: AttackModeStats[]
   multishot: StatValue
-  grandTotalDamage: StatValue
 }
 
 export interface WarframeStats {
@@ -159,7 +157,7 @@ export const DAMAGE_TYPE_COLORS: Record<string, DamageType> = {
   DT_BLAST_COLOR: "blast",
   DT_EXPLOSION_COLOR: "blast",
   DT_RADIATION_COLOR: "radiation",
-  // WFCD calls Void damage "radiant" in description tokens.
+  // The game calls Void damage "radiant" in description tokens.
   DT_RADIANT_COLOR: "void",
   DT_GAS_COLOR: "gas",
   DT_MAGNETIC_COLOR: "magnetic",
