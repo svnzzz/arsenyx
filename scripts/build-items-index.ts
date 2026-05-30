@@ -39,6 +39,7 @@ import {
   ZAW_STRIKES,
 } from "@arsenyx/shared/warframe/zaw-data"
 import {
+  isKitgunChamber,
   KITGUN_GRIPS,
   KITGUN_LOADERS,
 } from "@arsenyx/shared/warframe/kitgun-data"
@@ -63,6 +64,7 @@ import { mergeArcanes, type MergedArcane } from "./build/merge-arcanes"
 import { mergeCompanions, type MergedCompanion } from "./build/merge-companions"
 import { mergeFrame, operatorsFromWiki, type MergedFrame } from "./build/merge-frames"
 import { deriveHelminthAbilities } from "./build/merge-helminth"
+import { mergeModular } from "./build/merge-modular"
 import { mergeMods, type MergedMod } from "./build/merge-mods"
 import { readPePlusUpgrades } from "./build/read-pe-plus"
 import {
@@ -158,6 +160,14 @@ async function main() {
   ) as { Companions?: Record<string, Record<string, unknown>> }
   const wikiCompanions = wikiCompanionsBlob.Companions ?? {}
   console.log(`Wiki: ${Object.keys(wikiFramesBlob.Warframes ?? {}).length} warframes, ${Object.keys(wikiCompanions).length} companions`)
+
+  // Modular (Kitgun/Zaw) stat tables. Module:Modular/data is the only
+  // verifiable source for the per-combination stats DE zeroes out; pass the
+  // weapon entries so chamber damage can be allocated across attack modes.
+  const modularData = mergeModular(
+    readWikiModule(resolve(WIKI_DIR, "Modular_data.lua")),
+    wikiWeaponsByName,
+  )
 
   // ---------- 2. Merge weapons ----------
   // DE rows with `slot === undefined` are modular component parts (Kitgun
@@ -662,6 +672,34 @@ async function main() {
   console.log(
     `  OK  incarnon-evolutions.json (${Object.keys(INCARNON_EVOLUTIONS).length} weapons, ${(incarnonBody.length / 1024).toFixed(1)} KB)`,
   )
+
+  // Modular (Kitgun/Zaw) stat reconstruction tables — fetched by the build
+  // editor to recompute a chamber's stats from the selected grip + loader.
+  const modularBody = JSON.stringify(modularData)
+  await writeFile(resolve(OUT_DIR, "modular.json"), modularBody, "utf8")
+  const kitgunChambers =
+    Object.keys(modularData.kitgun.primary).length +
+    Object.keys(modularData.kitgun.secondary).length
+  console.log(
+    `  OK  modular.json (${kitgunChambers} kitgun chambers, ${Object.keys(modularData.kitgun.loaders).length} loaders, ${Object.keys(modularData.zaw.strikes).length} zaw strikes, ${(modularBody.length / 1024).toFixed(1)} KB)`,
+  )
+
+  // Guard the runtime stat-reconstruction coupling: a kitgun chamber's stats
+  // resolve via `item.family` → modular.json[class][family]. `family` (wiki
+  // `Family`), the Module:Modular/data Chamber key, and the catalog name must
+  // agree, or `adjustChamberForKitgun` silently falls back to the zero-stat
+  // shell — the exact bug this data fixes, reintroduced invisibly. Warn at
+  // build time if any kitgun chamber browse item has no usable modular entry.
+  for (const w of mergedWeapons) {
+    if (!isKitgunChamber(w.uniqueName)) continue
+    const cls = w.slot === "Primary" ? "primary" : "secondary"
+    const chamber = w.family ? modularData.kitgun[cls][w.family] : undefined
+    if (!chamber || Object.keys(chamber.grips).length === 0) {
+      console.warn(
+        `  WARN kitgun chamber "${w.name}" (family=${w.family ?? "?"}, ${cls}) has no usable Module:Modular/data entry — its stats won't reconstruct`,
+      )
+    }
+  }
 
   // Zaw component picker thumbnails. Grips/links/strikes aren't catalog items,
   // so resolve their DE CDN URLs (with version hash) from the manifest by
