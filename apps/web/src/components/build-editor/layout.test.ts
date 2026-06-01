@@ -7,7 +7,10 @@ import {
   getArcaneSlotConfig,
   getArcaneSlotCount,
   getAuraSlotCount,
+  getLockedStance,
   hasExilusSlot,
+  hasLockedStance,
+  hasStanceSlot,
   resolveInitialArcanes,
 } from "./layout"
 import type { PlacedArcane } from "./use-arcane-slots"
@@ -35,6 +38,18 @@ const KITGUN_SECONDARY: Pick<
 const NORMAL_PISTOL: Pick<DetailItem, "displayClass" | "uniqueName"> = {
   displayClass: "Pistol",
   uniqueName: "/Lotus/Weapons/Tenno/Pistol/Lex",
+}
+
+// Companion weapons split by displayClass: beast claws ("Claws (Beast)") carry
+// a Penjaga Posture slot rendered as the stance slot; robotic/sentinel weapons
+// have neither a stance nor an exilus slot.
+const ADARZA_CLAWS: Pick<DetailItem, "stancePolarity" | "displayClass"> = {
+  displayClass: "Claws (Beast)",
+  stancePolarity: "penjaga",
+}
+const SWEEPER: Pick<DetailItem, "stancePolarity" | "displayClass"> = {
+  displayClass: "Shotgun (Sentinel)",
+  stancePolarity: undefined,
 }
 
 // Voidrig's Arquebex (arch-gun) and Bonewidow's Ironbride (arch-melee) are the
@@ -105,6 +120,13 @@ describe("hasExilusSlot", () => {
     expect(hasExilusSlot("primary", NORMAL_PISTOL)).toBe(true)
     expect(hasExilusSlot("companions", NORMAL_PISTOL)).toBe(false)
   })
+
+  it("denies an exilus slot to companion weapons (sentinel + beast)", () => {
+    // Robotic/Sentinel weapons have no exilus slot and can't take arcanes;
+    // beast claws carry a Posture (stance) slot instead.
+    expect(hasExilusSlot("companion-weapons", SWEEPER)).toBe(false)
+    expect(hasExilusSlot("companion-weapons", ADARZA_CLAWS)).toBe(false)
+  })
 })
 
 describe("resolveInitialArcanes — kitgun re-bucketing", () => {
@@ -158,6 +180,80 @@ describe("getAuraSlotCount", () => {
 
   it("gives railjack its single Plexus aura slot", () => {
     expect(getAuraSlotCount("railjack", { auraPolarity: null })).toBe(1)
+  })
+})
+
+// Desert Wind (Baruuk): a locked exalted melee — Zenurik stance polarity plus
+// a permanently installed Serene Storm stance emitted as `innateStance`.
+const DESERT_WIND: Pick<
+  DetailItem,
+  "displayClass" | "uniqueName" | "stancePolarity" | "innateStance"
+> = {
+  displayClass: "Exalted Weapon",
+  uniqueName: "/Lotus/Powersuits/Pacifist/PacifistFist",
+  stancePolarity: "zenurik",
+  innateStance: { name: "Serene Storm", imageName: "https://img/serene.png" },
+}
+// Garuda Talons: the exception — a *free* Claw stance slot (Madurai), so it
+// carries a stancePolarity but NO innateStance (not locked).
+const GARUDA_TALONS: Pick<
+  DetailItem,
+  "displayClass" | "uniqueName" | "stancePolarity" | "innateStance"
+> = {
+  displayClass: "Claws",
+  uniqueName: "/Lotus/Powersuits/Garuda/GarudaBaseFusedClaws",
+  stancePolarity: "madurai",
+}
+
+describe("hasStanceSlot", () => {
+  it("surfaces a stance slot for melee exalted weapons (locked and free)", () => {
+    // Exalted Blade et al. are frame *melee* exalteds: they carry
+    // stancePolarity + innateStance and render a locked stance slot.
+    expect(hasStanceSlot(DESERT_WIND, "exalted-weapons")).toBe(true)
+    expect(hasStanceSlot(GARUDA_TALONS, "exalted-weapons")).toBe(true)
+  })
+
+  it("gives beast claws a stance (Posture) slot via their Penjaga polarity", () => {
+    expect(hasStanceSlot(ADARZA_CLAWS, "companion-weapons")).toBe(true)
+  })
+
+  it("denies a stance slot to exalted guns / Necramech exalted (no stancePolarity)", () => {
+    // Arquebex (arch-gun) and Ironbride (Necramech arch-melee) carry no
+    // stancePolarity. (Exalted Blade is NOT here — it's a melee exalted with a
+    // locked stance, asserted true above.)
+    expect(hasStanceSlot(ARQUEBEX, "exalted-weapons")).toBe(false)
+    expect(hasStanceSlot(IRONBRIDE, "exalted-weapons")).toBe(false)
+  })
+
+  it("denies a stance slot to sentinel weapons (no stancePolarity)", () => {
+    expect(hasStanceSlot(SWEEPER, "companion-weapons")).toBe(false)
+  })
+
+  it("never surfaces a stance slot on the Plexus", () => {
+    expect(hasStanceSlot({ stancePolarity: "naramon" }, "railjack")).toBe(false)
+  })
+})
+
+describe("hasLockedStance / getLockedStance", () => {
+  it("treats a locked exalted melee as having a fixed, pre-filled stance", () => {
+    expect(hasLockedStance(DESERT_WIND, "exalted-weapons")).toBe(true)
+    const locked = getLockedStance(DESERT_WIND, "exalted-weapons")
+    expect(locked?.mod.name).toBe("Serene Storm")
+    expect(locked?.mod.type).toBe("Stance")
+    // Polarity mirrors the slot (Zenurik) so a max-rank stance yields +10.
+    expect(locked?.mod.polarity).toBe("zenurik")
+    expect(locked?.mod.imageName).toBe("https://img/serene.png")
+  })
+
+  it("gives Garuda Talons a normal (non-locked) stance slot", () => {
+    expect(hasLockedStance(GARUDA_TALONS, "exalted-weapons")).toBe(false)
+    expect(getLockedStance(GARUDA_TALONS, "exalted-weapons")).toBeUndefined()
+  })
+
+  it("never locks a stance outside the exalted-weapons category", () => {
+    // A regular melee carrying the same fields wouldn't be a locked exalted.
+    expect(hasLockedStance(DESERT_WIND, "melee")).toBe(false)
+    expect(getLockedStance(DESERT_WIND, "melee")).toBeUndefined()
   })
 })
 

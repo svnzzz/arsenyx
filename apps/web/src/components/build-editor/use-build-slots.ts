@@ -103,16 +103,20 @@ export interface SlotLayout {
   auraSlotCount: number
   showExilus: boolean
   showStance: boolean
+  /** A locked exalted stance is shown but read-only — exclude it from
+   *  selection/placement so the cursor and "place in first empty" skip it. */
+  stanceLocked?: boolean
 }
 
 /**
  * Ordered list of visible slots in reading order:
- * aura-0, stance?, exilus?, aura-1..N-1, normal-0..N.
+ * aura-0, stance?, exilus?, aura-1..N-1, normal-0..N. A locked stance is
+ * omitted — it's display-only and can't hold a user-placed mod.
  */
 export function getVisibleSlots(layout: SlotLayout): SlotId[] {
   const out: SlotId[] = []
   if (layout.auraSlotCount > 0) out.push("aura-0")
-  if (layout.showStance) out.push("stance")
+  if (layout.showStance && !layout.stanceLocked) out.push("stance")
   if (layout.showExilus) out.push("exilus")
   for (let i = 1; i < layout.auraSlotCount; i++) {
     out.push(`aura-${i}` as SlotId)
@@ -120,6 +124,27 @@ export function getVisibleSlots(layout: SlotLayout): SlotId[] {
   for (let i = 0; i < layout.normalSlotCount; i++) {
     out.push(`normal-${i}` as SlotId)
   }
+  return out
+}
+
+/**
+ * Drop seeded slot entries whose slot doesn't exist in this layout. A
+ * legacy or imported build can carry a mod (or forma) in a slot the current
+ * item lacks — e.g. a companion-weapon build saved when the editor still drew
+ * an Exilus slot for that category. Left in, such an entry renders nowhere yet
+ * still feeds the capacity/endo math (`calculateCapacity` reads `placed.exilus`
+ * directly), can't be removed, and is re-serialized on every save. Filtering by
+ * `getVisibleSlots` keeps exactly the slots the editor can surface.
+ */
+export function dropOrphanSlots<T>(
+  seed: Partial<Record<SlotId, T>>,
+  layout: SlotLayout,
+): Partial<Record<SlotId, T>> {
+  const visible = new Set<SlotId>(getVisibleSlots(layout))
+  const entries = Object.entries(seed) as [SlotId, T][]
+  if (entries.every(([id]) => visible.has(id))) return seed
+  const out: Partial<Record<SlotId, T>> = {}
+  for (const [id, v] of entries) if (visible.has(id)) out[id] = v
   return out
 }
 
@@ -209,6 +234,9 @@ export function useBuildSlots(
     auraSlotCount?: number
     showExilus?: boolean
     showStance?: boolean
+    /** Exalted weapons with a permanently installed stance — the stance slot
+     *  is shown read-only, so keep it out of selection/placement. */
+    stanceLocked?: boolean
     /** Set to null for read-only views that shouldn't start with a focused slot. */
     initialSelected?: SlotId | null
     /** Mutual-exclusion graph. When supplied, `place` rejects a mod that
@@ -217,16 +245,6 @@ export function useBuildSlots(
     conflictMap?: ModConflictMap
   },
 ): BuildSlotsState {
-  const [placed, setPlaced] = useState<Partial<Record<SlotId, PlacedMod>>>(
-    () => initial?.placed ?? {},
-  )
-  const [selected, setSelected] = useState<SlotId | null>(
-    () => initial?.initialSelected ?? "normal-0",
-  )
-  const [formaPolarities, setFormaPolarities] = useState<
-    Partial<Record<SlotId, Polarity>>
-  >(() => initial?.formaPolarities ?? {})
-
   const auraSlotCount = initial?.auraSlotCount ?? 0
   const conflictMap = initial?.conflictMap
   const layout: SlotLayout = {
@@ -234,7 +252,18 @@ export function useBuildSlots(
     auraSlotCount,
     showExilus: initial?.showExilus ?? false,
     showStance: initial?.showStance ?? false,
+    stanceLocked: initial?.stanceLocked ?? false,
   }
+
+  const [placed, setPlaced] = useState<Partial<Record<SlotId, PlacedMod>>>(() =>
+    dropOrphanSlots(initial?.placed ?? {}, layout),
+  )
+  const [selected, setSelected] = useState<SlotId | null>(
+    () => initial?.initialSelected ?? "normal-0",
+  )
+  const [formaPolarities, setFormaPolarities] = useState<
+    Partial<Record<SlotId, Polarity>>
+  >(() => dropOrphanSlots(initial?.formaPolarities ?? {}, layout))
 
   const place = useCallback(
     (mod: Mod) => {
@@ -289,6 +318,7 @@ export function useBuildSlots(
       layout.auraSlotCount,
       layout.showExilus,
       layout.showStance,
+      layout.stanceLocked,
     ],
   )
 
