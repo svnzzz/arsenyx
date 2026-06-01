@@ -2,11 +2,13 @@ import { Hono } from "hono"
 
 import { prisma } from "../db"
 import { Prisma } from "../generated/prisma/client"
+import { purgeEdge } from "../lib/edge-cache"
 import { parseJsonBody } from "../lib/validate"
 import { rateLimitUser } from "../middleware/rate-limit"
 import { isPrismaNotFound, requireAdmin } from "./_admin"
 import { parseListQuery, runList } from "./_build-list"
 import { parsePage, trimQ } from "./_query"
+import { isVisibility } from "./builds"
 
 export const admin = new Hono()
 
@@ -199,6 +201,35 @@ admin.get("/builds", adminSearchLimit, async (c) => {
   return c.json(result)
 })
 
+admin.patch("/builds/:slug", adminMutateLimit, async (c) => {
+  const actor = await requireAdmin(c)
+  if (actor instanceof Response) return actor
+
+  const slug = c.req.param("slug")
+
+  const parsed = await parseJsonBody(c, { maxBytes: 1024 })
+  if (!parsed.ok) return parsed.response
+  const visibility = parsed.value.visibility
+  if (!isVisibility(visibility)) {
+    return c.json({ error: "invalid_visibility" }, 400)
+  }
+
+  try {
+    const updated = await prisma.build.update({
+      where: { slug },
+      data: { visibility },
+      select: { id: true, slug: true, visibility: true },
+    })
+    // Evict any anonymous edge-cached detail so a build flipped to PRIVATE
+    // stops being served publicly — mirrors the owner PATCH (builds.ts).
+    purgeEdge(c, `/builds/${slug}`)
+    return c.json(updated)
+  } catch (err) {
+    if (isPrismaNotFound(err)) return c.json({ error: "not_found" }, 404)
+    throw err
+  }
+})
+
 admin.delete("/builds/:slug", adminMutateLimit, async (c) => {
   const actor = await requireAdmin(c)
   if (actor instanceof Response) return actor
@@ -210,6 +241,9 @@ admin.delete("/builds/:slug", adminMutateLimit, async (c) => {
     if (isPrismaNotFound(err)) return c.json({ error: "not_found" }, 404)
     throw err
   }
+  // Drop the anonymous edge-cached detail of the now-deleted build — mirrors
+  // the owner DELETE (builds.ts).
+  purgeEdge(c, `/builds/${slug}`)
   return c.body(null, 204)
 })
 
