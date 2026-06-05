@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { Copy, UploadCloud } from "lucide-react"
-import { useMemo, useState } from "react"
+import { ClipboardPaste, Copy, UploadCloud } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import {
   calculateFormaCount,
@@ -16,6 +16,7 @@ import { Footer } from "@/components/footer"
 import { Header } from "@/components/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { requireUser } from "@/lib/auth-guards"
 import { saveDraft } from "@/lib/import-draft"
 import {
   applyOverframeScrape,
@@ -31,6 +32,9 @@ import { apiErrorMessage, apiFetch, ApiError } from "@/lib/util/api-client"
 import { copyToClipboard } from "@/lib/util/clipboard"
 
 export const Route = createFileRoute("/import")({
+  // Import feeds the sign-in-only editor/save flow, and the API endpoints are
+  // auth-gated — bounce anon users to sign-in instead of letting them hit a 401.
+  beforeLoad: () => requireUser(),
   loader: async ({ context }) => {
     await Promise.all([
       context.queryClient.ensureQueryData(itemsIndexQuery),
@@ -42,6 +46,13 @@ export const Route = createFileRoute("/import")({
   component: ImportPage,
 })
 
+/** Normalise an apiFetch failure into a user-facing import error. */
+function importError(err: unknown): Error {
+  const fallback =
+    err instanceof ApiError ? `Import failed: ${err.status}` : "Import failed"
+  return new Error(apiErrorMessage(err, fallback), { cause: err })
+}
+
 async function postOverframeImport(url: string): Promise<ScrapeResponse> {
   try {
     return await apiFetch<ScrapeResponse>(`/imports/overframe`, {
@@ -49,10 +60,73 @@ async function postOverframeImport(url: string): Promise<ScrapeResponse> {
       json: { url },
     })
   } catch (err) {
-    const fallback =
-      err instanceof ApiError ? `Import failed: ${err.status}` : "Import failed"
-    throw new Error(apiErrorMessage(err, fallback), { cause: err })
+    throw importError(err)
   }
+}
+
+/** Sentinel tagging the clipboard payload — shared by the bookmarklet that
+ * writes it (buildBookmarklet) and the parser that reads it back. */
+const OVERFRAME_PASTE_SOURCE = "arsenyx-overframe"
+
+/** Payload the bookmarklet copies to the clipboard. */
+type PastedOverframe = {
+  source?: string
+  url?: string
+  nextData?: unknown
+}
+
+/**
+ * Interpret pasted clipboard text. The bookmarklet wraps the page's
+ * __NEXT_DATA__ as `{ source: "arsenyx-overframe", url, nextData }`; we also
+ * accept a bare __NEXT_DATA__ blob in case someone copies it by hand.
+ */
+function parsePastedOverframe(text: string): {
+  nextData: unknown
+  url?: string
+} {
+  const obj = JSON.parse(text.trim()) as PastedOverframe
+  // A non-object (number/string/array primitive, or null) is never a valid
+  // __NEXT_DATA__ blob — reject it here so the caller surfaces the friendly
+  // "doesn't look like Overframe build data" message instead of a bare 400.
+  if (!obj || typeof obj !== "object") {
+    throw new Error("Pasted data is not an object")
+  }
+  if (obj.source === OVERFRAME_PASTE_SOURCE) {
+    return {
+      nextData: obj.nextData,
+      url: typeof obj.url === "string" ? obj.url : undefined,
+    }
+  }
+  return { nextData: obj }
+}
+
+async function importPastedOverframe(text: string): Promise<ScrapeResponse> {
+  let input: { nextData: unknown; url?: string }
+  try {
+    input = parsePastedOverframe(text)
+  } catch {
+    throw new Error(
+      "That doesn't look like Overframe build data. Use the bookmarklet on an Overframe build page, then paste here.",
+    )
+  }
+  try {
+    return await apiFetch<ScrapeResponse>(`/imports/overframe/raw`, {
+      method: "POST",
+      json: input,
+    })
+  } catch (err) {
+    throw importError(err)
+  }
+}
+
+/**
+ * The bookmarklet: reads __NEXT_DATA__ off the (already challenge-cleared)
+ * Overframe tab, copies it to the clipboard, and opens our import page with
+ * `?paste=1`. Built from the live origin so the dev build points at :5173 and
+ * prod points at www.arsenyx.com.
+ */
+function buildBookmarklet(origin: string): string {
+  return `javascript:(function(){try{var e=document.getElementById('__NEXT_DATA__');if(!e){alert('Arsenyx: open an Overframe build page first — no build data found here.');return;}var p=JSON.stringify({source:${JSON.stringify(OVERFRAME_PASTE_SOURCE)},url:location.href,nextData:JSON.parse(e.textContent)});navigator.clipboard.writeText(p).then(function(){window.open(${JSON.stringify(`${origin}/import?paste=1`)},'_blank');},function(){alert('Arsenyx: the browser blocked clipboard access. Try clicking the bookmark again.');});}catch(x){alert('Arsenyx import failed: '+(x&&x.message?x.message:x));}})();`
 }
 
 function ImportPage() {
@@ -63,11 +137,70 @@ function ImportPage() {
   const { data: arcanes } = useQuery(arcanesQuery)
   const { data: helminthAbilities } = useQuery(helminthQuery)
 
+  const [pasteText, setPasteText] = useState("")
+  const pasteRef = useRef<HTMLTextAreaElement>(null)
+  const bookmarkRef = useRef<HTMLAnchorElement>(null)
+  const isPasteMode =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("paste") === "1"
+
   const mutation = useMutation({ mutationFn: postOverframeImport })
-  const result = mutation.data
+  const rawMutation = useMutation({ mutationFn: importPastedOverframe })
+
+  // Only one import path is ever live at a time — each submit handler resets
+  // the other mutation (below). So whichever isn't idle is the active one, and
+  // result/error read from it as a single source instead of three coalesces
+  // that have to stay aligned.
+  const active =
+    rawMutation.isPending || rawMutation.data || rawMutation.isError
+      ? rawMutation
+      : mutation
+  const result = active.data
+  const isError = active.isError
+  const errorMessage = (active.error as Error | null)?.message
+
+  const submitPaste = (text: string) => {
+    if (!text.trim()) return
+    mutation.reset()
+    rawMutation.mutate(text)
+  }
+
+  // Set the bookmarklet href imperatively — React strips `javascript:` hrefs.
+  useEffect(() => {
+    if (bookmarkRef.current) {
+      bookmarkRef.current.href = buildBookmarklet(window.location.origin)
+    }
+  }, [])
+
+  // Arriving via the bookmarklet (`?paste=1`): focus the box and best-effort
+  // pre-fill it from the clipboard so the user just clicks Import. We fill but
+  // don't auto-submit — auto-POSTing whatever happens to be on the clipboard on
+  // page load is a surprising side effect; the explicit click is the confirm.
+  // Clipboard read can be blocked without a gesture — that's fine, they can
+  // paste manually (Ctrl/Cmd+V).
+  useEffect(() => {
+    if (!isPasteMode) return
+    pasteRef.current?.focus()
+    void (async () => {
+      try {
+        const text = await navigator.clipboard.readText()
+        if (text.trim()) setPasteText(text)
+      } catch {
+        // No clipboard permission without a gesture — manual paste still works.
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const fatalWarning = result?.warnings.find(
-    (w) => w.type === "invalid_url" || w.type === "fetch_failed",
+    (w) =>
+      w.type === "invalid_url" ||
+      w.type === "fetch_failed" ||
+      // The paste/bookmarklet path can't fail to fetch, so a missing
+      // __NEXT_DATA__ blob (wrong page copied, or Overframe changed shape) is
+      // its terminal failure — surface it as one clear error, not a soft
+      // warning followed by a confusing "could not match item".
+      w.type === "next_data_missing",
   )
 
   const matchedItem = useMemo(() => {
@@ -118,6 +251,7 @@ function ImportPage() {
     e.preventDefault()
     const trimmed = url.trim()
     if (!trimmed) return
+    rawMutation.reset()
     mutation.mutate(trimmed)
   }
 
@@ -177,13 +311,72 @@ function ImportPage() {
             </div>
           </form>
 
-          {mutation.isError && (
+          <details
+            className="bg-card rounded-md border p-4"
+            // Only force-open on arrival via the bookmarklet; otherwise leave
+            // it uncontrolled so the user can freely toggle it.
+            {...(isPasteMode ? { open: true } : {})}
+          >
+            <summary className="cursor-pointer text-sm font-medium">
+              Import blocked? Use the bookmarklet
+            </summary>
+            <div className="mt-4 flex flex-col gap-4 text-sm">
+              <p className="text-muted-foreground">
+                Overframe sits behind Cloudflare bot protection, so we
+                can&apos;t fetch builds server-side. Instead, drag this button
+                to your bookmarks bar:
+              </p>
+              <div>
+                {/* href is set imperatively in an effect — React strips
+                    javascript: hrefs. */}
+                <a
+                  ref={bookmarkRef}
+                  href="https://www.arsenyx.com/import"
+                  onClick={(e) => e.preventDefault()}
+                  className="border-primary/40 bg-primary/10 text-primary inline-flex cursor-grab items-center gap-2 rounded-md border px-3 py-1.5 font-medium"
+                  title="Drag me to your bookmarks bar"
+                >
+                  <UploadCloud className="h-4 w-4" /> Import to Arsenyx
+                </a>
+              </div>
+              <ol className="text-muted-foreground list-decimal space-y-1 pl-5">
+                <li>Open the Overframe build page you want to import.</li>
+                <li>
+                  Click the bookmarklet — it copies the build and reopens this
+                  page.
+                </li>
+                <li>
+                  Paste below (Ctrl/Cmd+V) if it isn&apos;t filled in
+                  automatically, then Import.
+                </li>
+              </ol>
+              <textarea
+                ref={pasteRef}
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                placeholder="Paste copied Overframe build data here…"
+                rows={4}
+                disabled={rawMutation.isPending}
+                className="border-input bg-background focus-visible:ring-ring w-full rounded-md border px-3 py-2 font-mono text-xs focus-visible:ring-2 focus-visible:outline-none"
+              />
+              <div>
+                <Button
+                  type="button"
+                  onClick={() => submitPaste(pasteText)}
+                  disabled={rawMutation.isPending || !pasteText.trim()}
+                >
+                  <ClipboardPaste className="h-4 w-4" />
+                  {rawMutation.isPending ? "Importing…" : "Import pasted data"}
+                </Button>
+              </div>
+            </div>
+          </details>
+
+          {isError && (
             <WarningBox
               fatal
               title="Import failed"
-              items={[
-                { tag: "error", text: (mutation.error as Error).message },
-              ]}
+              items={[{ tag: "error", text: errorMessage ?? "Import failed" }]}
             />
           )}
 
