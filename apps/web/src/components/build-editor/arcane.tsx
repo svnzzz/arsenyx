@@ -1,6 +1,12 @@
 import type { Arcane } from "@arsenyx/shared/warframe/types"
 import { Plus, Search, X } from "lucide-react"
-import { type MouseEvent, useDeferredValue, useMemo, useState } from "react"
+import {
+  type MouseEvent,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
 
 import {
   InputGroup,
@@ -23,8 +29,8 @@ import { getArcaneImageUrl } from "@/lib/util/arcane-images"
 import { cn } from "@/lib/util/utils"
 
 import { StatText } from "../stat-text"
+import { useRankHover } from "./rank-hover"
 import type { PlacedArcane } from "./use-arcane-slots"
-import { useRankHotkey } from "./use-rank-hotkey"
 
 function statsAt(arcane: Arcane, rank: number): string[] {
   if (!arcane.levelStats || arcane.levelStats.length === 0) return []
@@ -35,6 +41,8 @@ function statsAt(arcane: Arcane, rank: number): string[] {
 interface ArcaneCardProps {
   arcane: Arcane
   rank: number
+  /** Arcane slot index — identifies this card to the shared rank-hotkey owner. */
+  slotIndex?: number
   /** Called with -1/+1 when the user presses -/+ while hovering. Caller clamps. */
   onRankChange?: (delta: -1 | 1) => void
   onClick?: () => void
@@ -46,18 +54,28 @@ interface ArcaneCardProps {
 export function ArcaneCard({
   arcane,
   rank: currentRank,
+  slotIndex,
   onRankChange,
   onClick,
   isSelected,
   disableHover = false,
   className,
 }: ArcaneCardProps) {
-  const [hovered, setHovered] = useState(false)
+  const rankHover = useRankHover()
+  // Rank hotkeys are owned by a single listener in editor-shell; this card just
+  // advertises itself as the hovered target. Arcanes rank on hover only (never
+  // on selection), matching the prior behavior. No-op without a provider.
+  const canRank = !disableHover && !!onRankChange && slotIndex != null
 
-  useRankHotkey({
-    enabled: hovered && !disableHover && !!onRankChange,
-    onDelta: (d) => onRankChange?.(d),
-  })
+  // When the picker opens, `disableHover` flips true and both mouse handlers
+  // below go undefined — so a stale hover registration could otherwise linger
+  // and let `-`/`+` rank this arcane behind the open picker. Clear it
+  // explicitly. `clear` is a no-op unless this card is still the active target.
+  useEffect(() => {
+    if (disableHover && rankHover && slotIndex != null) {
+      rankHover.clear({ kind: "arcane", index: slotIndex })
+    }
+  }, [disableHover, rankHover, slotIndex])
 
   const stats = statsAt(arcane, currentRank)
   const formattedStats = stats.join("\n")
@@ -71,8 +89,16 @@ export function ArcaneCard({
           "ring-primary ring-offset-background ring-2 ring-offset-1",
         className,
       )}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={
+        canRank && rankHover
+          ? () => rankHover.set({ kind: "arcane", index: slotIndex! })
+          : undefined
+      }
+      onMouseLeave={
+        canRank && rankHover
+          ? () => rankHover.clear({ kind: "arcane", index: slotIndex! })
+          : undefined
+      }
       onClick={onClick}
     >
       <div className="relative mt-1.5 h-[65px] w-[80px] overflow-hidden rounded">
@@ -125,6 +151,8 @@ export function ArcaneCard({
 interface ArcaneSlotProps {
   options: Arcane[]
   placed?: PlacedArcane | null
+  /** This slot's index — forwarded to ArcaneCard for the rank-hotkey owner. */
+  slotIndex?: number
   /** Placeholder text shown when the slot is empty. Defaults to "Arcane". */
   label?: string
   /** Names of arcanes already placed in sibling slots — dimmed in the picker. */
@@ -140,6 +168,7 @@ interface ArcaneSlotProps {
 export function ArcaneSlot({
   options,
   placed,
+  slotIndex,
   label = "Arcane",
   usedNames,
   selected,
@@ -205,6 +234,7 @@ export function ArcaneSlot({
           <ArcaneCard
             arcane={placed.arcane}
             rank={placed.rank}
+            slotIndex={slotIndex}
             onRankChange={readOnly ? undefined : onRankChange}
             disableHover={open}
           />

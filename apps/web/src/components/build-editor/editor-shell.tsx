@@ -4,7 +4,6 @@ import {
   encodeBuildDoc,
 } from "@arsenyx/shared/warframe/build-codec"
 import {
-  MAX_VARIANTS,
   projectVariant,
   type BuildDoc,
 } from "@arsenyx/shared/warframe/build-doc"
@@ -50,6 +49,7 @@ import {
   getVariants,
   isSyntheticVariant,
   normalizeBuildData,
+  pickPerVariantData,
   savedDataToBuildState,
   selectVariant,
   stripPersistedImages,
@@ -88,26 +88,31 @@ import { useBuildDerived, getBuildLayout } from "./build-derived"
 import { BuildSurface } from "./build-surface"
 import { DragController } from "./drag-controller"
 import { EditorVariantBar } from "./editor-variant-bar"
-import { GuideEditor, type GuideScope } from "./guide-editor"
+import { GuideEditor } from "./guide-editor"
 import { KeyboardHintBanner } from "./keyboard-hints"
 import { getPlexusGroupForIndex } from "./layout"
 import { resolveInitialArcanes } from "./layout"
-import {
-  computeMultiVariantPlan,
-  computeReactiveAutoFormaPlan,
-  type FullAutoFormaPlan,
-} from "./multi-variant-auto-forma"
 import { PublishDialog, type PublishVisibility } from "./publish-dialog"
-import { useArcaneSlots, type PlacedArcane } from "./use-arcane-slots"
 import {
-  dropOrphanSlots,
+  RankHoverProvider,
+  rankTargetsEqual,
+  type RankHoverApi,
+  type RankHoverTarget,
+} from "./rank-hover"
+import { useArcaneSlots, type PlacedArcane } from "./use-arcane-slots"
+import { useAutoFormaPlanner } from "./use-auto-forma-planner"
+import {
   useBuildSlots,
   slotKind,
   type PlacedMod,
   type SlotId,
 } from "./use-build-slots"
 import { useEditorHistory } from "./use-editor-history"
+import { useGuideState } from "./use-guide-state"
 import { useSlotKeyboardNav } from "./use-keyboard-nav"
+import { usePublishSettings } from "./use-publish-settings"
+import { useRankHotkey } from "./use-rank-hotkey"
+import { useVariantActions } from "./use-variant-actions"
 
 // ─── In-memory editor cache ─────────────────────────────────────────────────
 //
@@ -252,10 +257,7 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
           label: v.label,
           slots: data.slots ?? {},
           arcanes: data.arcanes ?? [],
-          helminth: data.helminth,
-          incarnonEnabled: data.incarnonEnabled,
-          incarnonPerks: data.incarnonPerks,
-          deploymentContext: data.deploymentContext,
+          ...pickPerVariantData(data),
           guideSummary: v.guideSummary,
           guideDescription: v.guideDescription,
         }
@@ -383,10 +385,10 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
       ...savedDataAll,
       slots: active.slots,
       arcanes: active.arcanes,
-      helminth: active.helminth,
-      incarnonEnabled: active.incarnonEnabled,
-      incarnonPerks: active.incarnonPerks,
-      deploymentContext: active.deploymentContext,
+      // Route per-variant fields through the single choke point (same as
+      // getVariants/selectVariant) so a future field can't be silently dropped
+      // here — it copies from `active` with no fallback to savedDataAll's mirror.
+      ...pickPerVariantData(active),
     }
     // Read once at mount — EditorShell re-keys on switch, so reading
     // stale variants[] state during this mount is the desired behavior.
@@ -478,6 +480,52 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
     { preventDefault: false },
   )
 
+  // ─── Rank hotkey (single owner) ─────────────────────────────────────
+  // One window listener for `-`/`+`, instead of one per slot/arcane card.
+  // Cards report which one the pointer is over via RankHoverProvider; this
+  // owner ranks `hovered ?? selected mod`. Routing through a single target is
+  // what fixes the multi-fire: a selected slot and a separately hovered slot
+  // used to each rank on one keypress. Arcanes rank on hover only (no
+  // selection fallback), preserving the prior per-card behavior.
+  const hoveredRankRef = useRef<RankHoverTarget | null>(null)
+  const rankHover = useMemo<RankHoverApi>(
+    () => ({
+      set: (target) => {
+        hoveredRankRef.current = target
+      },
+      clear: (target) => {
+        if (
+          hoveredRankRef.current &&
+          rankTargetsEqual(hoveredRankRef.current, target)
+        ) {
+          hoveredRankRef.current = null
+        }
+      },
+    }),
+    [],
+  )
+  useRankHotkey({
+    enabled: true,
+    onDelta: (delta) => {
+      const hovered = hoveredRankRef.current
+      if (hovered?.kind === "mod") {
+        const placed = slots.placed[hovered.id]
+        if (placed) slots.setRank(hovered.id, placed.rank + delta)
+        return
+      }
+      if (hovered?.kind === "arcane") {
+        const placed = arcanes.placed[hovered.index]
+        if (placed) arcanes.setRank(hovered.index, placed.rank + delta)
+        return
+      }
+      // Nothing hovered → act on the selected mod slot (keyboard-nav path).
+      if (slots.selected) {
+        const placed = slots.placed[slots.selected]
+        if (placed) slots.setRank(slots.selected, placed.rank + delta)
+      }
+    },
+  })
+
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { data: session } = authClient.useSession()
@@ -496,20 +544,15 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
   // localDraft is intentionally null) and kept in sync by the autosave effect.
   const [hasDraft, setHasDraft] = useState(() => storedDraft !== null)
 
-  const [visibility, setVisibility] = useState<PublishVisibility>(
-    () => existingBuild?.visibility ?? "PUBLIC",
-  )
-  const [organizationId, setOrganizationId] = useState<string | null>(
-    () => existingBuild?.organization?.id ?? null,
-  )
-  const [hideAuthor, setHideAuthor] = useState<boolean>(
-    () => existingBuild?.hideAuthor ?? false,
-  )
-  const [publishDialogOpen, setPublishDialogOpen] = useState(false)
+  const publish = usePublishSettings({
+    visibility: existingBuild?.visibility ?? "PUBLIC",
+    organizationId: existingBuild?.organization?.id ?? null,
+    hideAuthor: existingBuild?.hideAuthor ?? false,
+  })
 
   const { data: myOrgs } = useQuery({
     ...myOrgsQuery(),
-    enabled: !!session?.user && publishDialogOpen,
+    enabled: !!session?.user && publish.dialogOpen,
   })
   const organizations = myOrgs?.memberships.map((m) => m.organization) ?? []
 
@@ -537,26 +580,24 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
     slots.place(mod)
   }
 
-  const [guideSummary, setGuideSummary] = useState(
-    () =>
+  // Guide state (build-wide summary/description + per-variant scope dispatch).
+  // Scope resets to "build" on remount (variant switches) so switching variants
+  // doesn't silently change which guide you're editing.
+  const guide = useGuideState({
+    initialSummary:
       cachedShared?.guideSummary ??
       localDraft?.guideSummary ??
       existingBuild?.guide?.summary ??
       "",
-  )
-  const [guideDescription, setGuideDescription] = useState(
-    () =>
+    initialDescription:
       cachedShared?.guideDescription ??
       localDraft?.guideDescription ??
       existingBuild?.guide?.description ??
       draft?.guideDescription ??
       "",
-  )
-  // Scope of the GuideEditor — build-wide vs a specific variant. Resets
-  // to "build" on EditorShell remount (variant switches) which keeps the
-  // UX predictable: switching variants doesn't silently change what
-  // guide you're editing.
-  const [guideScope, setGuideScope] = useState<GuideScope>({ kind: "build" })
+    variants,
+    setVariants,
+  })
 
   const [zawComponents, setZawComponents] = useState<
     { grip: string; link: string } | undefined
@@ -643,8 +684,8 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
       kitgunComponents,
       lichBonusElement,
       buildName,
-      guideSummary,
-      guideDescription,
+      guideSummary: guide.buildSummary,
+      guideDescription: guide.buildDescription,
       formaPolarities: slots.formaPolarities,
     })
     // writeShared closes over storeKey; intentionally excluded — storeKey
@@ -657,8 +698,8 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
     kitgunComponents,
     lichBonusElement,
     buildName,
-    guideSummary,
-    guideDescription,
+    guide.buildSummary,
+    guide.buildDescription,
     slots.formaPolarities,
   ])
   const setIncarnonPerkAt = (tierIndex: number, perk: string | null) => {
@@ -780,109 +821,18 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
     capacitySharedInputs,
   } = useBuildDerived({ item, category, layout, slots, allArcanes, hasReactor })
 
-  // Reactive auto-forma plan — fast (stage 1 + greedy fallback only) so it
-  // runs on every render without blocking input. Stages 2/3 (rearrangement,
-  // Omni Forma) are kicked off lazily inside the click handler so the heavy
-  // search doesn't lag mod placement.
-  //
-  // Forma is build-wide in Warframe — every variant shares one
-  // `formaPolarities` — so the planner overlays the active variant's live
-  // editor state onto the saved `variants[]` array and considers the whole
-  // set.
-  const allVariantSlots = useMemo(
-    () =>
-      variants.map((v, i) =>
-        // The active variant's `placed` is already orphan-stripped by
-        // useBuildSlots. Inactive variants come straight from the saved doc, so
-        // strip them here too — otherwise a mod left in a slot this item no
-        // longer has (e.g. an Exilus mod on a legacy companion-weapon build)
-        // still feeds the auto-forma planner's capacity math and inflates that
-        // variant's `used`, producing phantom forma recommendations.
-        i === clampedActiveIndex
-          ? slots.placed
-          : dropOrphanSlots(v.slots ?? {}, layout),
-      ),
-    [variants, clampedActiveIndex, slots.placed, layout],
-  )
-  const reactiveAutoFormaPlan = useMemo<FullAutoFormaPlan | null>(() => {
-    if (capacity.used <= capacity.max) return null
-    return computeReactiveAutoFormaPlan({
-      ...capacitySharedInputs,
-      formaPolarities: slots.formaPolarities,
-      variantSlots: allVariantSlots,
-    })
-  }, [
-    capacity.used,
-    capacity.max,
+  // Auto-forma planning (cheap reactive plan + heavy preview cascade). Forma is
+  // build-wide in Warframe, so the planner considers every variant's slots
+  // together; the computation lives in multi-variant-auto-forma.ts.
+  const autoForma = useAutoFormaPlanner({
+    variants,
+    clampedActiveIndex,
+    layout,
+    slots,
+    capacity,
     capacitySharedInputs,
-    slots.formaPolarities,
-    allVariantSlots,
-  ])
-
-  const [autoFormaDialogOpen, setAutoFormaDialogOpen] = useState(false)
-  const [pendingHeavyPlan, setPendingHeavyPlan] =
-    useState<FullAutoFormaPlan | null>(null)
-
-  const applyAutoFormaPlan = (plan: FullAutoFormaPlan) => {
-    // Apply forma changes first so the active-variant capacity computation
-    // sees the new polarities by the time rearrangements land.
-    for (const step of plan.steps) {
-      slots.setForma(step.id, step.polarity)
-    }
-    // Apply per-variant rearrangements: active variant goes through the
-    // slots hook; the rest update the in-memory `variants[]` array directly.
-    for (const arr of plan.rearrangements) {
-      if (arr.variantIndex === clampedActiveIndex) {
-        slots.setPlaced(arr.placed)
-      } else {
-        setVariants((prev) =>
-          prev.map((v, i) =>
-            i === arr.variantIndex ? { ...v, slots: arr.placed } : v,
-          ),
-        )
-      }
-    }
-  }
-
-  // "No fix found" feedback — flips true briefly after a fruitless click so
-  // the button can hint at the result instead of looking broken. The timer
-  // lives in an effect so we clear it on unmount (variant switch, route
-  // change) and avoid setState on a dead component.
-  const [noFixFound, setNoFixFound] = useState(false)
-  useEffect(() => {
-    if (!noFixFound) return
-    const id = window.setTimeout(() => setNoFixFound(false), 1800)
-    return () => window.clearTimeout(id)
-  }, [noFixFound])
-  const flashNoFix = () => setNoFixFound(true)
-  const handleAutoForma = () => {
-    // Fast path: reactive plan exists → silent apply. Matches the single-
-    // variant UX where the button always applies forma-only improvements.
-    if (reactiveAutoFormaPlan && reactiveAutoFormaPlan.steps.length > 0) {
-      applyAutoFormaPlan(reactiveAutoFormaPlan)
-      return
-    }
-    // Reactive plan empty — run the full stages 1→2→3 cascade on click.
-    // Synchronous, but only at click time so it doesn't lag editing.
-    const plan = computeMultiVariantPlan({
-      ...capacitySharedInputs,
-      formaPolarities: slots.formaPolarities,
-      variantSlots: allVariantSlots,
-    })
-    if (!plan) {
-      flashNoFix()
-      return
-    }
-    if (plan.stage === 1) {
-      // Cascade found a stage-1 plan that the cheap reactive path missed
-      // (different search semantics — DFS vs greedy). Apply silently.
-      applyAutoFormaPlan(plan)
-      return
-    }
-    // Stages 2/3 move user mods or burn Omni Forma — show the preview.
-    setPendingHeavyPlan(plan)
-    setAutoFormaDialogOpen(true)
-  }
+    setVariants,
+  })
 
   const isUpdate = !!existingBuild && existingBuild.isOwner
 
@@ -997,10 +947,14 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
       return
     }
     if (!isUpdate) {
-      setPublishDialogOpen(true)
+      publish.setDialogOpen(true)
       return
     }
-    void performSave(visibility, organizationId, hideAuthor)
+    void performSave(
+      publish.visibility,
+      publish.organizationId,
+      publish.hideAuthor,
+    )
   }
 
   // Ctrl/Cmd+S saves from anywhere in the editor, including while a text
@@ -1017,7 +971,7 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
       navigate({ to: "/auth/signin" })
       return
     }
-    setPublishDialogOpen(false)
+    publish.setDialogOpen(false)
     setSaveStatus("saving")
     try {
       const body = {
@@ -1038,8 +992,8 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
         formaCount,
         catalogVersion: __DATA_VERSION__,
         guide: {
-          summary: guideSummary.trim() || null,
-          description: guideDescription.trim() || null,
+          summary: guide.buildSummary.trim() || null,
+          description: guide.buildDescription.trim() || null,
         },
         // itemImageName tracks the incarnon toggle (and any future image
         // change), so update it on PATCH too. The identity fields
@@ -1125,10 +1079,12 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
       label: existing?.label ?? SYNTHETIC_VARIANT_LABEL,
       slots: slots.placed,
       arcanes: arcanes.placed,
-      helminth,
-      incarnonEnabled,
-      incarnonPerks,
-      deploymentContext,
+      ...pickPerVariantData({
+        helminth,
+        incarnonEnabled,
+        incarnonPerks,
+        deploymentContext,
+      }),
       // Per-variant guide fields are owned by `variants[i]` directly
       // (GuideEditor writes through setVariants). Preserve them on
       // snapshot so a save while editing build-wide doesn't wipe them.
@@ -1191,8 +1147,8 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
       saveEditorDraft(storeKey, {
         buildData: captureBuildData(),
         buildName,
-        guideSummary,
-        guideDescription,
+        guideSummary: guide.buildSummary,
+        guideDescription: guide.buildDescription,
       })
       setHasDraft(true)
     }, 600)
@@ -1202,8 +1158,8 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     buildName,
-    guideSummary,
-    guideDescription,
+    guide.buildSummary,
+    guide.buildDescription,
     slots.placed,
     slots.formaPolarities,
     arcanes.placed,
@@ -1247,104 +1203,19 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const newVariantId = () =>
-    `v${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`
-
-  const switchVariant = (i: number) => {
-    if (i === clampedActiveIndex) return
-    const snapshot = captureActiveSnapshot()
-    const next = variants.map((v, idx) =>
-      idx === clampedActiveIndex ? snapshot : v,
-    )
-    setVariants(next)
-    navigate({
-      to: ".",
-      // When `share` is in the URL, `v: undefined` lets validateSearch's
-      // `activeVariantFromShare` fallback re-derive v from the share's
-      // encoded activeIndex — which silently overrides the user's click
-      // back to variant 0. Emit explicit `v: 0` in that case so the user's
-      // choice wins. Clean `v: undefined` when share is absent.
-      search: (s) => ({ ...s, v: i === 0 && !s.share ? undefined : i }),
-      replace: true,
-    })
-  }
-
-  const addVariant = () => {
-    if (variants.length >= MAX_VARIANTS) return
-    const snapshot = captureActiveSnapshot()
-    const seeded = variants.map((v, idx) =>
-      idx === clampedActiveIndex ? snapshot : v,
-    )
-    const blank: SavedVariant = {
-      id: newVariantId(),
-      label: `Variant ${seeded.length + 1}`,
-      slots: {},
-      arcanes: [],
-    }
-    const next = [...seeded, blank]
-    setVariants(next)
-    navigate({
-      to: ".",
-      search: (s) => ({ ...s, v: next.length - 1 }),
-      replace: true,
-    })
-    bumpVariantEpoch()
-  }
-
-  const duplicateActive = () => {
-    if (variants.length >= MAX_VARIANTS) return
-    const snapshot = captureActiveSnapshot()
-    const dup: SavedVariant = {
-      ...snapshot,
-      id: newVariantId(),
-      label: `${snapshot.label} (copy)`,
-    }
-    const seeded = variants.map((v, idx) =>
-      idx === clampedActiveIndex ? snapshot : v,
-    )
-    const insertAt = clampedActiveIndex + 1
-    const next = [...seeded.slice(0, insertAt), dup, ...seeded.slice(insertAt)]
-    setVariants(next)
-    navigate({
-      to: ".",
-      search: (s) => ({ ...s, v: insertAt === 0 ? undefined : insertAt }),
-      replace: true,
-    })
-    bumpVariantEpoch()
-  }
-
-  const deleteActive = () => {
-    if (variants.length <= 1) return
-    const next = variants.filter((_, i) => i !== clampedActiveIndex)
-    setVariants(next)
-    const newIdx = Math.min(clampedActiveIndex, next.length - 1)
-    navigate({
-      to: ".",
-      // Same share-aware fallback as switchVariant.
-      search: (s) => ({
-        ...s,
-        v: newIdx === 0 && !s.share ? undefined : newIdx,
-      }),
-      replace: true,
-    })
-    // Deleting a non-last active variant keeps `?v` unchanged (the next
-    // variant slides into this index), so the navigate alone won't remount.
-    // Bump the epoch to force the re-hydration regardless.
-    bumpVariantEpoch()
-  }
-
-  const renameActive = (label: string) => {
-    const trimmed =
-      label.trim().slice(0, 24) || `Variant ${clampedActiveIndex + 1}`
-    setVariants((prev) =>
-      prev.map((v, i) =>
-        i === clampedActiveIndex ? { ...v, label: trimmed } : v,
-      ),
-    )
-  }
+  // Variant CRUD handlers. The variants state + module cache + epoch stay here
+  // (composition root); this just sequences snapshot → mutate → navigate.
+  const variantActions = useVariantActions({
+    variants,
+    setVariants,
+    clampedActiveIndex,
+    captureActiveSnapshot,
+    navigate,
+    bumpVariantEpoch,
+  })
 
   return (
-    <>
+    <RankHoverProvider value={rankHover}>
       <EditorHeader
         item={item}
         category={category}
@@ -1375,7 +1246,10 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
         }
         settings={
           isUpdate
-            ? { visibility, onEdit: () => setPublishDialogOpen(true) }
+            ? {
+                visibility: publish.visibility,
+                onEdit: () => publish.setDialogOpen(true),
+              }
             : undefined
         }
         onShare={handleShare}
@@ -1408,9 +1282,10 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
               category,
               capacityUsed: capacity.used,
               capacityMax: capacity.max,
-              autoFormaCount: reactiveAutoFormaPlan?.steps.length ?? 0,
-              autoFormaNoFix: noFixFound,
-              onAutoForma: handleAutoForma,
+              autoFormaCount:
+                autoForma.reactiveAutoFormaPlan?.steps.length ?? 0,
+              autoFormaNoFix: autoForma.noFixFound,
+              onAutoForma: autoForma.handleAutoForma,
               hasReactor,
               onToggleReactor: () => setHasReactor((v) => !v),
               shards,
@@ -1437,11 +1312,11 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
               <EditorVariantBar
                 variants={variants}
                 activeIndex={clampedActiveIndex}
-                onSwitch={switchVariant}
-                onAdd={addVariant}
-                onDuplicate={duplicateActive}
-                onDelete={deleteActive}
-                onRename={renameActive}
+                onSwitch={variantActions.switchVariant}
+                onAdd={variantActions.addVariant}
+                onDuplicate={variantActions.duplicateActive}
+                onDelete={variantActions.deleteActive}
+                onRename={variantActions.renameActive}
               />
             }
             onEditRiven={riven.openForEdit}
@@ -1485,62 +1360,19 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
 
           <div className="bg-card rounded-lg border p-4 select-text">
             <GuideEditor
-              summary={
-                guideScope.kind === "build"
-                  ? guideSummary
-                  : (variants[guideScope.index]?.guideSummary ?? "")
-              }
-              onSummaryChange={(v) => {
-                if (guideScope.kind === "build") {
-                  setGuideSummary(v)
-                  return
-                }
-                const idx = guideScope.index
-                setVariants((prev) =>
-                  prev.map((sv, i) =>
-                    i === idx ? { ...sv, guideSummary: v } : sv,
-                  ),
-                )
-              }}
-              description={
-                guideScope.kind === "build"
-                  ? guideDescription
-                  : (variants[guideScope.index]?.guideDescription ?? "")
-              }
-              onDescriptionChange={(v) => {
-                if (guideScope.kind === "build") {
-                  setGuideDescription(v)
-                  return
-                }
-                const idx = guideScope.index
-                setVariants((prev) =>
-                  prev.map((sv, i) =>
-                    i === idx ? { ...sv, guideDescription: v } : sv,
-                  ),
-                )
-              }}
+              {...guide.editorProps}
               buildSlug={isUpdate ? existingBuild?.slug : undefined}
-              scopes={variants.map((v) => ({
-                id: v.id,
-                label: v.label,
-                hasContent: Boolean(
-                  (v.guideSummary && v.guideSummary.trim()) ||
-                  (v.guideDescription && v.guideDescription.trim()),
-                ),
-              }))}
-              activeScope={guideScope}
-              onScopeChange={setGuideScope}
             />
           </div>
         </div>
       </DragController>
 
       <PublishDialog
-        open={publishDialogOpen}
-        onOpenChange={setPublishDialogOpen}
-        initialVisibility={visibility}
-        initialOrganizationId={organizationId}
-        initialHideAuthor={hideAuthor}
+        open={publish.dialogOpen}
+        onOpenChange={publish.setDialogOpen}
+        initialVisibility={publish.visibility}
+        initialOrganizationId={publish.organizationId}
+        initialHideAuthor={publish.hideAuthor}
         owner={{
           name: session?.user?.name ?? "You",
           username:
@@ -1555,29 +1387,28 @@ export function EditorShell({ search }: { search: EditorShellSearch }) {
           organizationId: nextOrgId,
           hideAuthor: nextHideAuthor,
         }) => {
-          setVisibility(next)
-          setOrganizationId(nextOrgId)
-          setHideAuthor(nextHideAuthor)
-          setPublishDialogOpen(false)
+          publish.apply({
+            visibility: next,
+            organizationId: nextOrgId,
+            hideAuthor: nextHideAuthor,
+          })
+          publish.setDialogOpen(false)
           if (!isUpdate) void performSave(next, nextOrgId, nextHideAuthor)
         }}
       />
 
       {riven.dialog}
 
-      {pendingHeavyPlan && (
+      {autoForma.pendingHeavyPlan && (
         <AutoFormaDialog
-          open={autoFormaDialogOpen}
-          onOpenChange={(open) => {
-            setAutoFormaDialogOpen(open)
-            if (!open) setPendingHeavyPlan(null)
-          }}
-          plan={pendingHeavyPlan}
+          open={autoForma.dialogOpen}
+          onOpenChange={autoForma.onDialogOpenChange}
+          plan={autoForma.pendingHeavyPlan}
           variantLabels={variants.map((v) => v.label)}
-          originalVariantSlots={allVariantSlots}
-          onApply={() => applyAutoFormaPlan(pendingHeavyPlan)}
+          originalVariantSlots={autoForma.allVariantSlots}
+          onApply={autoForma.applyPendingPlan}
         />
       )}
-    </>
+    </RankHoverProvider>
   )
 }

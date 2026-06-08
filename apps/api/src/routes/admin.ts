@@ -7,6 +7,7 @@ import { parseJsonBody } from "../lib/validate"
 import { rateLimitUser } from "../middleware/rate-limit"
 import { isPrismaNotFound, requireAdmin } from "./_admin"
 import { parseListQuery, runList } from "./_build-list"
+import { allBuildsScope } from "./_build-visibility"
 import { parsePage, trimQ } from "./_query"
 import { isVisibility } from "./builds"
 
@@ -149,19 +150,9 @@ admin.patch("/users/:id", adminMutateLimit, async (c) => {
     })
     // Better Auth caches `isBanned` in the session cookie for up to 60s
     // (auth.ts), so a ban only takes effect on cookie refresh. Delete the
-    // user's sessions to force re-auth on the next request. API keys are
-    // deactivated in the same step so a banned user can't keep hitting
-    // /api/v1 with a pre-existing PAT — requireApiKey checks isBanned on
-    // each call, but flipping isActive is the explicit, durable signal a
-    // moderator can see in the user's key list.
+    // user's sessions to force re-auth on the next request.
     if (data.isBanned === true) {
-      await Promise.all([
-        prisma.session.deleteMany({ where: { userId: targetId } }),
-        prisma.apiKey.updateMany({
-          where: { userId: targetId, isActive: true },
-          data: { isActive: false },
-        }),
-      ])
+      await prisma.session.deleteMany({ where: { userId: targetId } })
     }
     return c.json(updated)
   } catch (err) {
@@ -194,8 +185,7 @@ admin.get("/builds", adminSearchLimit, async (c) => {
 
   const result = await runList({
     filters: parseListQuery(c),
-    baseWhere: {},
-    baseFilter: Prisma.sql`TRUE`,
+    ...allBuildsScope(),
     defaultSort: "newest",
   })
   return c.json(result)
