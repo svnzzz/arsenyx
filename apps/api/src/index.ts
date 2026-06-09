@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 
 import { auth } from "./auth"
+import type { Bindings } from "./bindings"
 import { withPrisma } from "./db"
 import { webOrigins } from "./env"
 import { rateLimitAnonRead } from "./middleware/rate-limit"
@@ -81,5 +82,15 @@ app.get("/health", (c) => c.json({ ok: true }))
 export default {
   port: 8787,
   fetch: (req: Request, env: unknown, ctx: ExecutionContext) =>
-    withPrisma(ctx, () => app.fetch(req, env, ctx)),
+    // Read the binding defensively: a missing/misapplied HYPERDRIVE binding
+    // yields "" here rather than throwing in the fetch export (which would
+    // escape app.onError and 500 every request, incl. /health and CORS
+    // preflights). With "", only routes that actually touch `prisma.*`
+    // fail — surfaced as a clean JSON 500 via onError — matching the old
+    // lazy process.env.DATABASE_URL behavior.
+    withPrisma(
+      (env as Bindings | undefined)?.HYPERDRIVE?.connectionString ?? "",
+      ctx,
+      () => app.fetch(req, env, ctx),
+    ),
 }

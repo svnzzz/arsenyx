@@ -11,7 +11,9 @@ routes = [
 ]
 
 # Secrets (set via `bunx wrangler secret put <NAME>`):
-#   DATABASE_URL              — Neon production pooled connection string
+#   DATABASE_URL              — PlanetScale *direct* connection string. Used by
+#                               the Prisma CLI (db:push/studio/generate) ONLY.
+#                               The Worker runtime reads HYPERDRIVE instead.
 #   BETTER_AUTH_SECRET        — `openssl rand -base64 32`
 #   GITHUB_CLIENT_ID
 #   GITHUB_CLIENT_SECRET
@@ -40,6 +42,19 @@ name = "ANON_READ_LIMITER"
 type = "ratelimit"
 namespace_id = "1002"
 simple = { limit = 120, period = 60 }
+
+# Cloudflare Hyperdrive → PlanetScale Postgres. The Worker runtime connects via
+# env.HYPERDRIVE.connectionString (see src/db.ts); Hyperdrive owns the upstream
+# pool, pointed at PlanetScale's direct endpoint. Recreate (e.g. after a role
+# rotation) with:
+#   bunx wrangler hyperdrive update c99d68f482634c9b944449a03bc6b13d \
+#     --connection-string="postgresql://USER:PASS@HOST:5432/postgres?sslmode=verify-full"
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "c99d68f482634c9b944449a03bc6b13d"
+# Local dev connection is read from a gitignored env var so the credential is
+# never committed: set CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE
+# in apps/api/.env (see .env.example).
 
 [observability]
 enabled = true
