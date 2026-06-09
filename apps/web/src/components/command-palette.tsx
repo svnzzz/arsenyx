@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { authClient } from "@/lib/auth-client"
+import { fuzzyRank } from "@/lib/fuzzy"
 import { itemsIndexQuery } from "@/lib/queries/items-index-query"
 import { CATEGORIES, getImageUrl, type BrowseItem } from "@/lib/warframe"
 
@@ -80,17 +81,23 @@ export function CommandPalette({
     return [...byKey.values()]
   }, [items])
 
-  const filteredItems = useMemo<ItemEntry[]>(() => {
-    const q = debouncedQuery.toLowerCase()
-    if (!q) return allItems.slice(0, 6)
-    return allItems
-      .filter(
-        (it) =>
-          it.name.toLowerCase().includes(q) ||
-          it.displayClass?.toLowerCase().includes(q),
-      )
-      .slice(0, 10)
-  }, [allItems, debouncedQuery])
+  // Searchable text per item, aligned by index with `allItems`. Folding in
+  // displayClass lets a class term ("excalibur umbra") match alongside the name.
+  const haystack = useMemo(
+    () =>
+      allItems.map((it) =>
+        it.displayClass ? `${it.name} ${it.displayClass}` : it.name,
+      ),
+    [allItems],
+  )
+
+  const filteredItems = useMemo<ItemEntry[]>(
+    () =>
+      fuzzyRank(haystack, debouncedQuery)
+        .slice(0, 10)
+        .map((i) => allItems[i]),
+    [allItems, haystack, debouncedQuery],
+  )
 
   useEffect(() => {
     setSelected(filteredItems[0] ? `item:${filteredItems[0].slug}` : "")
@@ -125,70 +132,42 @@ export function CommandPalette({
             <CommandEmpty>No results.</CommandEmpty>
 
             {!debouncedQuery && (
-              <>
-                <CommandGroup heading="Navigation">
+              <CommandGroup heading="Navigation">
+                <CommandItem
+                  onSelect={() =>
+                    go(() =>
+                      navigate({
+                        to: "/browse",
+                        search: { category: "warframes" },
+                      }),
+                    )
+                  }
+                >
+                  <Compass />
+                  <span>Browse items</span>
+                </CommandItem>
+                <CommandItem
+                  onSelect={() => go(() => navigate({ to: "/builds" }))}
+                >
+                  <LayoutGrid />
+                  <span>Community builds</span>
+                </CommandItem>
+                {session?.user ? (
                   <CommandItem
-                    onSelect={() =>
-                      go(() =>
-                        navigate({
-                          to: "/browse",
-                          search: { category: "warframes" },
-                        }),
-                      )
-                    }
+                    onSelect={() => go(() => navigate({ to: "/builds/mine" }))}
                   >
-                    <Compass />
-                    <span>Browse items</span>
+                    <User />
+                    <span>My builds</span>
                   </CommandItem>
-                  <CommandItem
-                    onSelect={() => go(() => navigate({ to: "/builds" }))}
-                  >
-                    <LayoutGrid />
-                    <span>Community builds</span>
-                  </CommandItem>
-                  {session?.user ? (
-                    <CommandItem
-                      onSelect={() =>
-                        go(() => navigate({ to: "/builds/mine" }))
-                      }
-                    >
-                      <User />
-                      <span>My builds</span>
-                    </CommandItem>
-                  ) : null}
-                  <CommandItem
-                    onSelect={() => go(() => navigate({ to: "/changelog" }))}
-                  >
-                    <ScrollText />
-                    <span>Changelog</span>
-                    <CommandShortcut>what's new</CommandShortcut>
-                  </CommandItem>
-                </CommandGroup>
-                {filteredItems.length > 0 ? (
-                  <>
-                    <CommandSeparator />
-                    <CommandGroup heading="Popular items">
-                      {filteredItems.map((item) => (
-                        <ItemRow
-                          key={item.slug}
-                          item={item}
-                          onSelect={() =>
-                            go(() =>
-                              navigate({
-                                to: "/browse/$category/$slug",
-                                params: {
-                                  category: item.category,
-                                  slug: item.slug,
-                                },
-                              }),
-                            )
-                          }
-                        />
-                      ))}
-                    </CommandGroup>
-                  </>
                 ) : null}
-              </>
+                <CommandItem
+                  onSelect={() => go(() => navigate({ to: "/changelog" }))}
+                >
+                  <ScrollText />
+                  <span>Changelog</span>
+                  <CommandShortcut>what's new</CommandShortcut>
+                </CommandItem>
+              </CommandGroup>
             )}
 
             {debouncedQuery && filteredItems.length > 0 ? (
