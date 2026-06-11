@@ -301,6 +301,15 @@ function ExpandedModCard({
   vtPrefix,
 }: ExpandedProps) {
   const stats = getModStats(mod, rank, setCount)
+  // Set bonus (DE ExportModSet, one tier per equipped set member — tier
+  // count == set size for every set). With n set mods equipped show the
+  // active tier; with none (mod picker, browse) preview the max tier.
+  // modSetStats is ordered ascending (tier 1 = one member … tier N = full set).
+  // With n members equipped show tier n (capped at the set size); with none
+  // equipped — the picker/browse preview — show the full-set max tier.
+  const setSize = mod.modSetStats?.length ?? 0
+  const setTier = setCount > 0 ? Math.min(setCount, setSize) : setSize
+  const setBonus = setSize > 0 ? mod.modSetStats?.[setTier - 1] : undefined
   const maxRank = modMaxRank(mod)
   const drain = drainOverride ?? baseDrainForMod(mod, rank)
   const compatLabel =
@@ -376,6 +385,23 @@ function ExpandedModCard({
                   </Fragment>
                 ))}
               </span>
+            </div>
+          )}
+
+          {setBonus && (
+            <div className="mt-1 w-full px-1 text-center">
+              <span
+                className="text-[10px] font-medium tracking-wide text-gray-400 uppercase"
+                style={{ fontFamily: "Roboto, sans-serif" }}
+              >
+                Set Bonus{setCount > 0 ? ` (${setCount}/${setSize})` : ""}
+              </span>
+              <div
+                className="text-[11px] leading-snug font-normal text-gray-300"
+                style={{ fontFamily: "Roboto, sans-serif" }}
+              >
+                <StatText text={setBonus} />
+              </div>
             </div>
           )}
 
