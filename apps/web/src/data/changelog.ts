@@ -16,7 +16,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       {
         type: "feat",
         description:
-          "Archon Shards on Sirius & Orion are now per form: each half keeps its own shards, so planning one form no longer wipes the other's. They're saved in the share link too, so it opens with both forms' shards intact.",
+          "Archon Shards are now per variant: every build variant keeps its own shard set, so changing one variant's shards no longer affects the others. They're saved in the share link too, so a build opens with each variant's shards intact.",
       },
       {
         type: "chore",
