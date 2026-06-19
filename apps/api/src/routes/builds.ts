@@ -505,6 +505,7 @@ builds.get(
     // builds regardless of visibility so they can link private/unlisted
     // ones from the editor.
     const rows = await prisma.build.findMany({
+      relationLoadStrategy: "join",
       where: {
         AND: [
           {
@@ -582,6 +583,9 @@ builds.get("/:slug/partners", edgeCache({ maxAge: 300 }), async (c) => {
 
   const build = await prisma.build.findUnique({
     where: { slug },
+    // partnerBuilds nests user + organization (via LIST_SELECT), so the default
+    // strategy fans out into several queries; join collapses them.
+    relationLoadStrategy: "join",
     select: {
       id: true,
       userId: true,
@@ -845,6 +849,7 @@ builds.get("/:slug", edgeCache({ maxAge: 300 }), async (c) => {
   if (c.req.query("embed") === "1") {
     const slim = await prisma.build.findUnique({
       where: { slug },
+      relationLoadStrategy: "join",
       select: {
         slug: true,
         name: true,
@@ -890,6 +895,11 @@ builds.get("/:slug", edgeCache({ maxAge: 300 }), async (c) => {
     getSession(c),
     prisma.build.findUnique({
       where: { slug },
+      // Fold user + organization + buildGuide into one LATERAL-join SELECT
+      // rather than a query-per-relation. The detail page was the single
+      // largest source of DB query volume (one view = build + guide + author +
+      // org as four separate SELECTs); see _build-list.ts for the rationale.
+      relationLoadStrategy: "join",
       include: DETAIL_INCLUDE,
     }),
   ])
