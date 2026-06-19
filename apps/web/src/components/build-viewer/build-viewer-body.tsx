@@ -25,7 +25,7 @@ import {
   refreshImagesFromMap,
   selectVariant,
 } from "@/lib/codec/build-codec-adapter"
-import { deriveFormAxis } from "@/lib/form-axis"
+import { applyFormPolarities, deriveFormAxis } from "@/lib/form-axis"
 import { makeRefResolver } from "@/lib/guide-refs"
 import { arcanesQuery } from "@/lib/queries/arcanes-query"
 import { type BuildDetail, hasGuideContent } from "@/lib/queries/build-query"
@@ -188,9 +188,24 @@ function BuildViewerBodyInner({
     formNames,
     formVariants,
     formActiveLocalIndex,
+    formPolarities,
+    formAuraPolarity,
+    formExilusPolarity,
   } = useMemo(
     () => deriveFormAxis(item, variants, activeIndex),
     [item, variants, activeIndex],
+  )
+  // Polarity-overridden view of the item (active form's innate polarities) for
+  // the layout, slot grid, and forma/capacity maths — see `applyFormPolarities`.
+  const effectiveItem = useMemo(
+    () =>
+      applyFormPolarities(item, {
+        isTwin,
+        formPolarities,
+        formAuraPolarity,
+        formExilusPolarity,
+      }),
+    [isTwin, item, formPolarities, formAuraPolarity, formExilusPolarity],
   )
   const selectForm = (formIndex: number) => {
     const target = variants.findIndex((v) => (v.formIndex ?? 0) === formIndex)
@@ -198,7 +213,10 @@ function BuildViewerBodyInner({
   }
 
   const categoryLabel = getCategoryLabel(category)
-  const layout = useMemo(() => getBuildLayout(item, category), [item, category])
+  const layout = useMemo(
+    () => getBuildLayout(effectiveItem, category),
+    [effectiveItem, category],
+  )
   const { isCompanion, normalSlotCount, auraSlotCount, arcaneCount } = layout
 
   const slots = useBuildSlots(normalSlotCount, {
@@ -226,7 +244,7 @@ function BuildViewerBodyInner({
     saved.deploymentContext ?? DEFAULT_DEPLOYMENT_CONTEXT
 
   const { arcaneConfig, totalEndoCost, formaCount, capacity } = useBuildDerived(
-    { item, category, layout, slots, allArcanes, hasReactor },
+    { item: effectiveItem, category, layout, slots, allArcanes, hasReactor },
   )
 
   const sidebarProps = {
@@ -297,7 +315,7 @@ function BuildViewerBodyInner({
         <BuildSurface
           mode="view"
           embed={embed}
-          item={item}
+          item={effectiveItem}
           category={category}
           isCompanion={isCompanion}
           normalSlotCount={normalSlotCount}
