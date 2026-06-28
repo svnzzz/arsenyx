@@ -11,6 +11,31 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    date: "2026-06-28",
+    changes: [
+      {
+        type: "feat",
+        description:
+          "Five more incarnons have their evolution trees in the planner: Vectis, Ballistica, Stug, Destreza, and Obex. Turn on Incarnon and you get the same tier-by-tier perk picker as the rest.",
+      },
+      {
+        type: "fix",
+        description:
+          "The Incarnon Genesis adapter icon now shows when you enable Incarnon on a Steel Path weapon. Every genesis weapon used to fall back to a blank placeholder there.",
+      },
+      {
+        type: "fix",
+        description:
+          "The mod picker no longer offers mods a weapon can't actually equip: beam-only mods like Ruinous Extension stay off non-beam pistols such as the Furis, and the semi-auto-only Cannonade mods stay off full-auto weapons.",
+      },
+      {
+        type: "fix",
+        description:
+          "You can no longer stack two augments for the same ability — for example two of Loki's Decoy augments. Once you slot one, the others grey out, and existing builds that doubled up now flag the conflict.",
+      },
+    ],
+  },
+  {
     date: "2026-06-20",
     changes: [
       {
