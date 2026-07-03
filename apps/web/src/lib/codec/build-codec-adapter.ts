@@ -13,17 +13,21 @@
  *
  * Conversion graph (→ = function that crosses the boundary):
  *
- *   share link ─decodeBuildDoc→ BuildDoc ─projectVariant→ BuildState
- *                                  ─buildStateToSavedData→ SavedBuildData → editor
+ *   share link ─decodeBuildDoc→ BuildDoc ─savedDataFromBuildDoc→ SavedBuildData → editor
  *   DB JSON ─normalizeBuildData→ SavedBuildData ─savedDataToBuildState→ BuildState
  *   editor ─captureBuildData→ SavedBuildData ─stripPersistedImages→ DB JSON
- *   BuildState ─encodeBuild / buildStateToBuildDoc+encodeBuildDoc→ share link
+ *   editor ─buildDocFromVariants→ BuildDoc ─encodeBuildDoc→ share link (multi)
+ *   BuildState ─encodeBuild→ share link (single variant)
  *
  * Within SavedBuildData, getVariants / selectVariant move between the top-level
  * mirror and a chosen variant; per-variant data is threaded through the single
  * pickPerVariantData choke point below. The codec itself (build-codec.ts) shares
  * one slot/meta primitive set across v1 and v2, so the wire formats can't drift.
  */
+import {
+  projectVariant,
+  type BuildDoc,
+} from "@arsenyx/shared/warframe/build-doc"
 import { RIVEN_IMAGE_NAME } from "@arsenyx/shared/warframe/rivens"
 import type {
   Arcane,
@@ -611,6 +615,116 @@ export function selectVariant(
     // kitgun, lich, buildName are shared across variants and stay as-is.
     shards: v.shards ?? [],
   }
+}
+
+/**
+ * Project the live editor state + its variants array into a share-link
+ * `BuildDoc`. `base` carries the build-wide fields (and the active variant's
+ * slots/arcanes/per-variant fields, used as the fallback for any variant that
+ * leaves a per-variant field undefined); `variants` is the in-memory variants
+ * array with the active slot already replaced by the live snapshot.
+ *
+ * The shared doc fields come from one `savedDataToBuildState(base)` pass, and
+ * each `BuildVariant` is the slot/arcane projection of that variant overlaid on
+ * the shared base. NOTE the asymmetry this must preserve: `helminthAbility` is
+ * build-wide (doc top-level only — `BuildVariant` has no helminth), the inverse
+ * of `projectVariant`. Do NOT route the per-variant list through
+ * `pickPerVariantData` here — that treats helminth as per-variant and would
+ * double-encode it.
+ */
+export function buildDocFromVariants(
+  base: Parameters<typeof savedDataToBuildState>[0],
+  variants: SavedVariant[],
+): BuildDoc {
+  const shared = savedDataToBuildState(base)
+  return {
+    itemUniqueName: shared.itemUniqueName,
+    itemName: shared.itemName,
+    itemCategory: shared.itemCategory,
+    itemImageName: shared.itemImageName,
+    hasReactor: shared.hasReactor,
+    helminthAbility: shared.helminthAbility,
+    zawComponents: shared.zawComponents,
+    kitgunComponents: shared.kitgunComponents,
+    lichBonusElement: shared.lichBonusElement,
+    buildName: shared.buildName,
+    variants: variants.map((sv) => {
+      // Reuse the shared base; the expensive ModSlot[] reconstruction happens
+      // via savedDataToBuildState with this variant's slots/arcanes overlaid.
+      // Forma is build-wide, so base.formaPolarities (the active variant's) is
+      // intentionally applied to every variant's projection.
+      const vs = savedDataToBuildState({
+        ...base,
+        slots: sv.slots,
+        arcanes: sv.arcanes,
+        // Per-variant shards: the captured active variant carries the live
+        // set; others carry their own (copy-on-load resolved at load).
+        shards: sv.shards ?? [],
+        incarnonEnabled: sv.incarnonEnabled ?? base.incarnonEnabled,
+        incarnonPerks: sv.incarnonPerks ?? base.incarnonPerks,
+        deploymentContext: sv.deploymentContext ?? base.deploymentContext,
+      })
+      return {
+        id: sv.id,
+        label: sv.label,
+        auraSlots: vs.auraSlots,
+        exilusSlot: vs.exilusSlot,
+        stanceSlot: vs.stanceSlot,
+        normalSlots: vs.normalSlots,
+        arcaneSlots: vs.arcaneSlots,
+        shardSlots: vs.shardSlots,
+        incarnonEnabled: vs.incarnonEnabled,
+        incarnonPerks: vs.incarnonPerks,
+        deploymentContext: vs.deploymentContext,
+        // formIndex lives only on the saved variant (not threaded through
+        // BuildState), so carry it straight across — twin-frame share links
+        // depend on it to pick the right form.
+        formIndex: sv.formIndex,
+      }
+    }),
+  }
+}
+
+/**
+ * Inverse of `buildDocFromVariants`: hydrate the editor's `SavedBuildData` from
+ * a decoded share-link `BuildDoc`. A single-variant doc projects to the bare
+ * top-level shape; a multi-variant doc adds the `variants` array, each variant
+ * projected via `projectVariant` (which re-broadcasts the build-wide helminth)
+ * and threaded through `pickPerVariantData` so the per-variant split stays in
+ * lockstep with the rest of the adapter.
+ */
+export function savedDataFromBuildDoc(
+  doc: BuildDoc,
+  mods: Mod[],
+  arcanes: Arcane[],
+): SavedBuildData {
+  const project = (i: number) =>
+    buildStateToSavedData(projectVariant(doc, i), mods, arcanes).data
+  // `formIndex` isn't carried through BuildState (projectVariant drops it), so
+  // lift it off the decoded doc variants directly — onto the top-level mirror
+  // (a single twin-frame variant on a non-primary form needs it) and each
+  // projected variant.
+  const activeData = { ...project(0), formIndex: doc.variants[0].formIndex }
+  if (doc.variants.length === 1) return activeData
+  const variants: SavedVariant[] = doc.variants.map((v, i) => {
+    // i === 0 is the active variant — reuse its projection rather than
+    // reconstructing the same slots a second time.
+    const data = i === 0 ? activeData : project(i)
+    return {
+      id: v.id,
+      label: v.label,
+      slots: data.slots ?? {},
+      arcanes: data.arcanes ?? [],
+      // Shards are per-variant (projectVariant reads each variant's own
+      // shardSlots), so carry each projection's set onto its variant.
+      shards: data.shards ?? [],
+      ...pickPerVariantData(data),
+      formIndex: v.formIndex,
+      guideSummary: v.guideSummary,
+      guideDescription: v.guideDescription,
+    }
+  })
+  return { ...activeData, variants }
 }
 
 // Older builds were saved when the upstream CDN shipped content-hashed image

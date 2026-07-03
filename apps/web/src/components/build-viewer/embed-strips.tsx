@@ -3,19 +3,10 @@ import type { LichBonusElement } from "@arsenyx/shared/warframe/types"
 import { isZawStrike } from "@arsenyx/shared/warframe/zaw-data"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { ExternalLink, Zap } from "lucide-react"
-import { type ReactNode, Suspense, useState } from "react"
+import { type ReactNode, Suspense } from "react"
 
 import { ShardSlot } from "@/components/build-editor/shard-controls"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { TapPopover } from "@/components/tap-popover"
 import type { HelminthAbility } from "@/lib/queries/helminth-query"
 import { incarnonEvolutionsQuery } from "@/lib/queries/incarnon-query"
 import { kitgunImagesQuery } from "@/lib/queries/kitgun-images-query"
@@ -282,7 +273,6 @@ function EmbedAbilityIcon({
   ability: { name: string; description: string; imageName?: string }
   isHelminth: boolean
 }) {
-  const [open, setOpen] = useState(false)
   const triggerEl = (
     <button
       type="button"
@@ -318,17 +308,12 @@ function EmbedAbilityIcon({
     </>
   )
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger render={<PopoverTrigger render={triggerEl} />} />
-        <TooltipContent side="bottom" className="max-w-xs">
-          {tooltipContent}
-        </TooltipContent>
-      </Tooltip>
-      <PopoverContent side="bottom" align="center" className="max-w-xs p-3">
-        {tooltipContent}
-      </PopoverContent>
-    </Popover>
+    <TapPopover
+      trigger={triggerEl}
+      tooltip={tooltipContent}
+      tooltipClassName="max-w-xs"
+      popoverClassName="max-w-xs p-3"
+    />
   )
 }
 
@@ -362,7 +347,6 @@ function EmbedZawStrip({
 }
 
 function EmbedZawPart({ name, type }: { name: string; type: "Grip" | "Link" }) {
-  const [open, setOpen] = useState(false)
   const { data: zawImages } = useQuery(zawImagesQuery)
   const imageName = zawImages?.[name]
   const triggerEl = (
@@ -390,15 +374,7 @@ function EmbedZawPart({ name, type }: { name: string; type: "Grip" | "Link" }) {
     </>
   )
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger render={<PopoverTrigger render={triggerEl} />} />
-        <TooltipContent side="bottom">{content}</TooltipContent>
-      </Tooltip>
-      <PopoverContent side="bottom" align="center" className="p-3">
-        {content}
-      </PopoverContent>
-    </Popover>
+    <TapPopover trigger={triggerEl} tooltip={content} popoverClassName="p-3" />
   )
 }
 
@@ -438,7 +414,6 @@ function EmbedKitgunPart({
   name: string
   type: "Grip" | "Loader"
 }) {
-  const [open, setOpen] = useState(false)
   const { data: kitgunImages } = useQuery(kitgunImagesQuery)
   const imageName = kitgunImages?.[name]
   const triggerEl = (
@@ -466,15 +441,7 @@ function EmbedKitgunPart({
     </>
   )
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger render={<PopoverTrigger render={triggerEl} />} />
-        <TooltipContent side="bottom">{content}</TooltipContent>
-      </Tooltip>
-      <PopoverContent side="bottom" align="center" className="p-3">
-        {content}
-      </PopoverContent>
-    </Popover>
+    <TapPopover trigger={triggerEl} tooltip={content} popoverClassName="p-3" />
   )
 }
 
@@ -529,7 +496,6 @@ function EmbedIncarnonTier({
   tier: number
   picked: { name: string; description: string } | null
 }) {
-  const [open, setOpen] = useState(false)
   const triggerEl = (
     <button
       type="button"
@@ -554,21 +520,13 @@ function EmbedIncarnonTier({
     <span className="text-muted-foreground">Tier {tier} — not selected</span>
   )
   return (
-    <Popover open={open} onOpenChange={picked ? setOpen : undefined}>
-      <Tooltip>
-        <TooltipTrigger
-          render={picked ? <PopoverTrigger render={triggerEl} /> : triggerEl}
-        />
-        <TooltipContent side="bottom" className="max-w-xs">
-          {tooltipContent}
-        </TooltipContent>
-      </Tooltip>
-      {picked && (
-        <PopoverContent side="bottom" align="center" className="max-w-xs p-3">
-          {tooltipContent}
-        </PopoverContent>
-      )}
-    </Popover>
+    <TapPopover
+      trigger={triggerEl}
+      tooltip={tooltipContent}
+      interactive={!!picked}
+      tooltipClassName="max-w-xs"
+      popoverClassName="max-w-xs p-3"
+    />
   )
 }
 
