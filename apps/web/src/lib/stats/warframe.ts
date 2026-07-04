@@ -23,7 +23,7 @@ const UMBRAL_MODS = new Set([
   "Umbral Intensify",
   "Umbral Fiber",
 ])
-const UMBRAL_SET_BONUSES: Record<number, number> = { 1: 1.0, 2: 1.25, 3: 1.75 }
+const UMBRAL_SET_BONUSES: Record<number, number> = { 1: 1.0, 2: 1.3, 3: 1.8 }
 
 type RankUp = { health: number; shield: number; armor: number; energy: number }
 
